@@ -7510,12 +7510,13 @@ a.anchor-link {
 </style>
 <!-- End of mermaid configuration --><style id="pagebreak-override">
 @media print {
+  /* 允许代码/输出在页底自然截断，不主动推到下一页 */
   .jp-Cell, .jp-CodeCell, .jp-MarkdownCell,
   .jp-InputArea, .jp-CodeMirrorEditor, .jp-Editor,
   .jp-OutputArea, .jp-OutputArea-child, .jp-OutputArea-prompt,
   .jp-CellBody, .jp-CellInput, .jp-CellOutput,
   .input, .inner_cell, .output, .output_wrapper, .output_area,
-  pre, .CodeMirror {
+  pre, .CodeMirror, .jp-CodeMirrorEditor pre {
     break-inside: auto !important;
     page-break-inside: auto !important;
   }
@@ -7524,13 +7525,13 @@ a.anchor-link {
 </head>
 <body class="jp-Notebook" data-jp-theme-light="true" data-jp-theme-name="JupyterLab Light">
 <main>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=e6a66f74">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=9ab8c779">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h1 id="%E7%AC%AC%E4%BA%8C%E5%91%A8%E4%BD%9C%E4%B8%9A%EF%BC%9Asklearn-%E4%B8%AD-KMeans-%E7%AE%97%E6%B3%95%E6%BA%90%E7%A0%81%E8%A7%A3%E6%9E%90---2263185%E8%8B%8F%E5%BD%A6%E7%BE%BD">第二周作业：sklearn 中 KMeans 算法源码解析 - 2263185苏彦羽<a class="anchor-link" href="#%E7%AC%AC%E4%BA%8C%E5%91%A8%E4%BD%9C%E4%B8%9A%EF%BC%9Asklearn-%E4%B8%AD-KMeans-%E7%AE%97%E6%B3%95%E6%BA%90%E7%A0%81%E8%A7%A3%E6%9E%90---2263185%E8%8B%8F%E5%BD%A6%E7%BE%BD">¶</a></h1><p>本 notebook 基于 <code>scikit-learn 1.3.2</code>，对 <code>sklearn.cluster.KMeans</code> 的源码进行逐层解析。</p>
+<h1 id="%E7%AC%AC%E4%BA%8C%E5%91%A8%E4%BD%9C%E4%B8%9A%EF%BC%9Asklearn-KMeans-%E7%AE%97%E6%B3%95%E6%BA%90%E7%A0%81%E8%A7%A3%E6%9E%90">第二周作业：sklearn-KMeans 算法源码解析<a class="anchor-link" href="#%E7%AC%AC%E4%BA%8C%E5%91%A8%E4%BD%9C%E4%B8%9A%EF%BC%9Asklearn-KMeans-%E7%AE%97%E6%B3%95%E6%BA%90%E7%A0%81%E8%A7%A3%E6%9E%90">¶</a></h1><p>本 notebook 基于 <code>scikit-learn 1.3.2</code>，对 <code>sklearn.cluster.KMeans</code> 的源码进行逐层解析。</p>
 <p>目标：</p>
 <ol>
 <li>定位 KMeans 的源码文件；</li>
@@ -7734,31 +7735,25 @@ KMeans defined at: /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklea
 (self, n_clusters=8, *, init='k-means++', n_init='warn', max_iter=300, tol=0.0001, verbose=0, random_state=None, copy_x=True, algorithm='lloyd')
 
 --- KMeans._parameter_constraints ---
-n_clusters    : [&lt;sklearn.utils._param_validation.Interval object at 0x74ec73c6baf0&gt;]
-init          : [&lt;sklearn.utils._param_validation.StrOptions object at 0x74ec73c6bb20&gt;, &lt;built-in function callable&gt;, 'array-like']
-n_init        : [&lt;sklearn.utils._param_validation.StrOptions object at 0x74ec73c6bbb0&gt;, &lt;sklearn.utils._param_validation.Hidden object at 0x74ec73c6bc70&gt;, &lt;sklearn.utils._param_validation.Interval object at 0x74ec73c6bcd0&gt;]
-max_iter      : [&lt;sklearn.utils._param_validation.Interval object at 0x74ec73c6bd00&gt;]
-tol           : [&lt;sklearn.utils._param_validation.Interval object at 0x74ec73c6bd60&gt;]
+n_clusters    : [&lt;sklearn.utils._param_validation.Interval object at 0x7ff6ff59f1c0&gt;]
+init          : [&lt;sklearn.utils._param_validation.StrOptions object at 0x7ff6ff59f1f0&gt;, &lt;built-in function callable&gt;, 'array-like']
+n_init        : [&lt;sklearn.utils._param_validation.StrOptions object at 0x7ff6ff59f280&gt;, &lt;sklearn.utils._param_validation.Hidden object at 0x7ff6ff59f340&gt;, &lt;sklearn.utils._param_validation.Interval object at 0x7ff6ff59f3a0&gt;]
+max_iter      : [&lt;sklearn.utils._param_validation.Interval object at 0x7ff6ff59f3d0&gt;]
+tol           : [&lt;sklearn.utils._param_validation.Interval object at 0x7ff6ff59f430&gt;]
 verbose       : ['verbose']
 random_state  : ['random_state']
 copy_x        : ['boolean']
-algorithm     : [&lt;sklearn.utils._param_validation.StrOptions object at 0x74ec73c6bf10&gt;]
+algorithm     : [&lt;sklearn.utils._param_validation.StrOptions object at 0x7ff6ff59f7c0&gt;]
 
 --- _BaseKMeans._parameter_constraints ---
-n_clusters    : [&lt;sklearn.utils._param_validation.Interval object at 0x74ec73c6baf0&gt;]
-init          : [&lt;sklearn.utils._param_validation.StrOptions object at 0x74ec73c6bb20&gt;, &lt;built-in function callable&gt;, 'array-like']
-n_init        : [&lt;sklearn.utils._param_validation.StrOptions object at 0x74ec73c6bbb0&gt;, &lt;sklearn.utils._param_validation.Hidden object at 0x74ec73c6bc70&gt;, &lt;sklearn.utils._param_validation.Interval object at 0x74ec73c6bcd0&gt;]
-max_iter      : [&lt;sklearn.utils._param_validation.Interval object at 0x74ec73c6bd00&gt;]
-tol           : [&lt;sklearn.utils._param_validation.Interval object at 0x74ec73c6bd60&gt;]
+n_clusters    : [&lt;sklearn.utils._param_validation.Interval object at 0x7ff6ff59f1c0&gt;]
+init          : [&lt;sklearn.utils._param_validation.StrOptions object at 0x7ff6ff59f1f0&gt;, &lt;built-in function callable&gt;, 'array-like']
+n_init        : [&lt;sklearn.utils._param_validation.StrOptions object at 0x7ff6ff59f280&gt;, &lt;sklearn.utils._param_validation.Hidden object at 0x7ff6ff59f340&gt;, &lt;sklearn.utils._param_validation.Interval object at 0x7ff6ff59f3a0&gt;]
+max_iter      : [&lt;sklearn.utils._param_validation.Interval object at 0x7ff6ff59f3d0&gt;]
+tol           : [&lt;sklearn.utils._param_validation.Interval object at 0x7ff6ff59f430&gt;]
 verbose       : ['verbose']
 random_state  : ['random_state']
-</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>
+
 --- 关键属性（fit 后产生） ---
 cluster_centers_ : (3, 2) # (n_clusters, n_features)
 labels_          : (300,) # (n_samples,)
@@ -7807,7 +7802,7 @@ n_features_in_   : 2             # 输入特征数
 <span class="c1">#   阶段3 数据中心化      : X_mean = X.mean(axis=0); x_squared_norms = row_norms(...)</span>
 <span class="c1">#   阶段4 多次重启择优    : for i in range(self._n_init): ...</span>
 <span class="c1">#   阶段5 回写属性        : cluster_centers_ = best_centers + X_mean 等</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">src</span><span class="p">)</span>  <span class="c1"># 完整 fit 源码（不再 [:1000] 截断）</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">src</span><span class="p">)</span>  <span class="c1"># 完整 fit 源码</span>
 </pre></div>
 </div>
 </div>
@@ -9249,35 +9244,35 @@ same trajectory: True
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>Initialization complete
-Iteration 0, inertia 1162.2860634859578.
+Iteration 0, inertia 1162.2860634859576.
 Iteration 1, inertia 680.4586086030591.
-Iteration 2, inertia 680.1708340947262.
+Iteration 2, inertia 680.170834094726.
 Converged at iteration 2: strict convergence.
 Initialization complete
 Iteration 0, inertia 3981.9042487481797.
-Iteration 1, inertia 842.4938314792108.
-Iteration 2, inertia 680.2079819659768.
-Converged at iteration 2: center shift 0.00014840365770549962 within tolerance 0.00046699124651711465.
+Iteration 1, inertia 842.4938314792107.
+Iteration 2, inertia 680.207981965977.
+Converged at iteration 2: center shift 0.00014840365770550827 within tolerance 0.00046699124651711465.
 Initialization complete
-Iteration 0, inertia 3043.5703034822245.
-Iteration 1, inertia 1680.0827908313333.
-Iteration 2, inertia 1594.031185983671.
+Iteration 0, inertia 3043.570303482225.
+Iteration 1, inertia 1680.082790831333.
+Iteration 2, inertia 1594.0311859836713.
 Iteration 3, inertia 1592.6225060329925.
-Iteration 4, inertia 1592.0708624633062.
-Iteration 5, inertia 1591.7600375383115.
+Iteration 4, inertia 1592.070862463306.
+Iteration 5, inertia 1591.7600375383117.
 Iteration 6, inertia 1591.5498546788854.
-Iteration 7, inertia 1591.2797482913174.
-Iteration 8, inertia 1591.187080702526.
-Converged at iteration 8: center shift 7.92643742817536e-05 within tolerance 0.00046699124651711465.
+Iteration 7, inertia 1591.2797482913177.
+Iteration 8, inertia 1591.1870807025261.
+Converged at iteration 8: center shift 7.926437428176288e-05 within tolerance 0.00046699124651711465.
 
-final inertia: 680.170834094726 | n_iter_: 3
+final inertia: 680.1708340947262 | n_iter_: 3
 </pre>
 </div>
 </div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=4cb7afda">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=b0782269">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
