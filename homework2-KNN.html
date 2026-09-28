@@ -7545,8 +7545,8 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="1.-KNN">1. KNN<a class="anchor-link" href="#1.-KNN">¶</a></h2><p>KNN（k-Nearest Neighbors，k 近邻）是一种<strong>非参数、惰性学习</strong>的方法：它没有显式的训练过程，只是把训练集原样"记下来"；预测时在训练集中找出与待预测样本<strong>距离最近的 k 个样本</strong>，再依据它们的目标值做决策。</p>
-<p><strong>算法流程</strong>（以分类为例）：</p>
+<h2 id="1.-KNN">1. KNN<a class="anchor-link" href="#1.-KNN">¶</a></h2><p>KNN（k-Nearest Neighbors，k 近邻）是一种<strong>非参数、基于实例的学习</strong>：它没有显式的训练过程，只是把训练集原样"记下来"；预测时在训练集中找出与待预测样本<strong>距离最近的 k 个样本</strong>，再依据它们的目标值做决策。</p>
+<p><strong>算法流程</strong>：</p>
 <ol>
 <li>计算待预测样本到所有训练样本的距离；</li>
 <li>选出距离最小的 k 个样本（k 是超参数）；</li>
@@ -7554,12 +7554,12 @@ a.anchor-link {
 <li>回归任务把第 3 步换成「取目标均值」即可。</li>
 </ol>
 <p>它的决策完全由<strong>局部邻域</strong>决定，因此对 k 与距离度量都很敏感：k 太小容易被噪声点带偏，k 太大又会抹平局部结构。</p>
-<p><strong>算法规则</strong>：找 k 个近邻 → 多数投票；<code>weights='distance'</code> 时按距离倒数加权；回归取近邻目标均值或加权均值。这些是数学定义。</p>
+<p><strong>算法规则</strong>：找 k 个近邻 → 多数投票；<code>weights='distance'</code> 时按距离倒数加权；回归取近邻目标均值或加权均值。</p>
 <table>
 <thead>
 <tr>
 <th>类别</th>
-<th>本作业关注的「不一样」的点</th>
+<th>本作业主要关注点</th>
 </tr>
 </thead>
 <tbody>
@@ -7587,7 +7587,8 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="2.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9Aneighbors-%E5%8C%85%E7%9A%84%E5%8F%AF%E5%88%86%E6%9E%90%E8%BE%B9%E7%95%8C">2. 定位源码：neighbors 包的可分析边界<a class="anchor-link" href="#2.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9Aneighbors-%E5%8C%85%E7%9A%84%E5%8F%AF%E5%88%86%E6%9E%90%E8%BE%B9%E7%95%8C">¶</a></h2><p>KNN 的实现集中在 <code>sklearn/neighbors/</code>。第一步要弄清楚<strong>哪些文件能看到源码</strong>——scikit-learn 把性能敏感的部分用 Cython 写了，装包后只剩编译好的 <code>.so</code>，<code>inspect.getsource</code> 会直接报错，只能当黑盒。</p>
+<h2 id="2.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9Aneighbors-%E5%8C%85%E7%9A%84%E5%8F%AF%E5%88%86%E6%9E%90%E8%BE%B9%E7%95%8C">2. 定位源码：neighbors 包的可分析边界<a class="anchor-link" href="#2.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9Aneighbors-%E5%8C%85%E7%9A%84%E5%8F%AF%E5%88%86%E6%9E%90%E8%BE%B9%E7%95%8C">¶</a></h2><p>KNN 的实现集中在 <code>sklearn/neighbors/</code>。</p>
+<p><strong>哪些文件能看到源码</strong>——scikit-learn 把性能敏感的部分用 Cython 写了，这些部分难以分析，我们主要关注 Python 部分。</p>
 </div>
 </div>
 </div>
@@ -7672,11 +7673,11 @@ neighbors    : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/n
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="3.-%E6%83%B0%E6%80%A7%E5%AD%A6%E4%B9%A0%E4%B8%8E%E7%B4%A2%E5%BC%95%E5%A4%8D%E7%94%A8%EF%BC%88D10%EF%BC%89">3. 惰性学习与索引复用（D10）<a class="anchor-link" href="#3.-%E6%83%B0%E6%80%A7%E5%AD%A6%E4%B9%A0%E4%B8%8E%E7%B4%A2%E5%BC%95%E5%A4%8D%E7%94%A8%EF%BC%88D10%EF%BC%89">¶</a></h2><p>KNN 是<strong>惰性学习（lazy learning）</strong>：<code>fit</code> 不"训练参数"，只做两件事——校验数据、为查询建立<strong>空间索引</strong>（KDTree / BallTree）。所以：</p>
+<h2 id="3.-%E7%B4%A2%E5%BC%95%E5%A4%8D%E7%94%A8">3. 索引复用<a class="anchor-link" href="#3.-%E7%B4%A2%E5%BC%95%E5%A4%8D%E7%94%A8">¶</a></h2><p><code>fit</code> 不"训练参数"，只校验数据、为查询建立<strong>空间索引</strong>（KDTree / BallTree）。所以：</p>
 <ul>
 <li><code>self._fit_X</code>（训练集本身）就是"模型"；模型大小 = O(n·d)，预测代价随训练集增长。</li>
 </ul>
-<p>实现里最"不一样"的一点：如果传给 <code>fit</code> 的 <code>X</code> <strong>本身已经是一个建好索引的对象</strong>（<code>NeighborsBase</code> / <code>KDTree</code> / <code>BallTree</code>），sklearn 会<strong>直接复用它的索引，完全不再重建</strong>。这让"预建索引 + 多个模型共享同一棵树"成为可能。</p>
+<p>注：如果传给 <code>fit</code> 的 <code>X</code> <strong>本身已经是一个建好索引的对象</strong>（<code>NeighborsBase</code> / <code>KDTree</code> / <code>BallTree</code>），sklearn 会<strong>直接复用它的索引，完全不再重建</strong>。这让"预建索引 + 多个模型共享同一棵树"成为可能。</p>
 </div>
 </div>
 </div>
@@ -7794,14 +7795,14 @@ n_samples_fit_         = 20
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="4.-%E6%8A%BD%E8%B1%A1%E5%9F%BA%E7%B1%BB%E4%B8%8E-Mixin-%E7%BB%84%E5%90%88%EF%BC%88D11%EF%BC%89">4. 抽象基类与 Mixin 组合（D11）<a class="anchor-link" href="#4.-%E6%8A%BD%E8%B1%A1%E5%9F%BA%E7%B1%BB%E4%B8%8E-Mixin-%E7%BB%84%E5%90%88%EF%BC%88D11%EF%BC%89">¶</a></h2><p>教科书里的 KNN 就是一个函数。sklearn 把它拆成了<strong>一个抽象基类 + 两个查询 Mixin</strong>：</p>
+<h2 id="4.-%E6%8A%BD%E8%B1%A1%E5%9F%BA%E7%B1%BB%E4%B8%8E-Mixin-%E7%BB%84%E5%90%88">4. 抽象基类与 Mixin 组合<a class="anchor-link" href="#4.-%E6%8A%BD%E8%B1%A1%E5%9F%BA%E7%B1%BB%E4%B8%8E-Mixin-%E7%BB%84%E5%90%88">¶</a></h2><p>sklearn 把KNN拆成了<strong>一个抽象基类 + 两个查询 Mixin</strong>：</p>
 <ul>
 <li><code>NeighborsBase</code>：只放<strong>参数、校验、建索引</strong>（<code>fit</code>），<strong>不含任何查询逻辑</strong>；它用 <code>ABCMeta</code> 声明为抽象基类，甚至把 <code>__init__</code> 标成 <code>@abstractmethod</code>——强制每个子类自定义构造器。</li>
 <li><code>KNeighborsMixin</code>：固定 k 的查询（<code>kneighbors</code>）；</li>
 <li><code>RadiusNeighborsMixin</code>：固定半径的查询（<code>radius_neighbors</code>）。</li>
 </ul>
 <p>组合的好处：<code>NearestNeighbors</code>、<code>KNeighborsClassifier/Regressor</code>、<code>LocalOutlierFactor</code>、<code>KNeighborsTransformer</code> <strong>共用同一套查询内核</strong>，各自只重写"聚合方式"。</p>
-<p>另外参数校验不是手写 <code>if</code>，而是声明式的 <code>_parameter_constraints</code> 字典。</p>
+<p>参数校验不是手写 <code>if</code>，而是声明式的 <code>_parameter_constraints</code> 字典。</p>
 </div>
 </div>
 </div>
@@ -7822,7 +7823,7 @@ n_samples_fit_         = 20
 
 <span class="nb">print</span><span class="p">()</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"NeighborsBase 的抽象方法 ="</span><span class="p">,</span> <span class="n">NeighborsBase</span><span class="o">.</span><span class="n">__abstractmethods__</span><span class="p">,</span>
-      <span class="s2">" &lt;- 连 __init__ 都是抽象的"</span><span class="p">)</span>
+      <span class="s2">" &lt;- 连 __init__ 都被抽象了，在子类里实现"</span><span class="p">)</span>
 
 <span class="n">mixins</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span><span class="o">.</span><span class="vm">__name__</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">NearestNeighbors</span><span class="o">.</span><span class="vm">__mro__</span>
           <span class="k">if</span> <span class="n">c</span><span class="o">.</span><span class="vm">__name__</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"KNeighborsMixin"</span><span class="p">,</span> <span class="s2">"RadiusNeighborsMixin"</span><span class="p">)]</span>
@@ -7855,19 +7856,19 @@ n_samples_fit_         = 20
      _MetadataRequester
      object
 
-NeighborsBase 的抽象方法 = frozenset({'__init__'})  &lt;- 连 __init__ 都是抽象的
+NeighborsBase 的抽象方法 = frozenset({'__init__'})  &lt;- 连 __init__ 都被抽象了，在子类里实现
 
 NearestNeighbors 同时继承两个查询 Mixin : ['KNeighborsMixin', 'RadiusNeighborsMixin']
 
 声明式参数校验 _parameter_constraints：
-     n_neighbors -&gt; [&lt;sklearn.utils._param_validation.Interval object at 0x7eab0913f0a0&gt;, None]
-     algorithm -&gt; [&lt;sklearn.utils._param_validation.StrOptions object at 0x7eab09145160&gt;]
-     leaf_size -&gt; [&lt;sklearn.utils._param_validation.Interval object at 0x7eab091451f0&gt;]
-     p -&gt; [&lt;sklearn.utils._param_validation.Interval object at 0x7eab09145220&gt;, None]
-     metric -&gt; [&lt;sklearn.utils._param_validation.StrOptions object at 0x7eab091452e0&gt;, &lt;built-in function callable&gt;]
+     n_neighbors -&gt; [&lt;sklearn.utils._param_validation.Interval object at 0x7fbd663591c0&gt;, None]
+     algorithm -&gt; [&lt;sklearn.utils._param_validation.StrOptions object at 0x7fbd6635f280&gt;]
+     leaf_size -&gt; [&lt;sklearn.utils._param_validation.Interval object at 0x7fbd6635f310&gt;]
+     p -&gt; [&lt;sklearn.utils._param_validation.Interval object at 0x7fbd6635f340&gt;, None]
+     metric -&gt; [&lt;sklearn.utils._param_validation.StrOptions object at 0x7fbd6635f400&gt;, &lt;built-in function callable&gt;]
      metric_params -&gt; [&lt;class 'dict'&gt;, None]
      n_jobs -&gt; [&lt;class 'numbers.Integral'&gt;, None]
-     weights -&gt; [&lt;sklearn.utils._param_validation.StrOptions object at 0x7eab091457c0&gt;, &lt;built-in function callable&gt;, None]
+     weights -&gt; [&lt;sklearn.utils._param_validation.StrOptions object at 0x7fbd6635f8e0&gt;, &lt;built-in function callable&gt;, None]
 </pre>
 </div>
 </div>
@@ -7880,7 +7881,7 @@ NearestNeighbors 同时继承两个查询 Mixin : ['KNeighborsMixin', 'RadiusNei
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="5.-algorithm=%22auto%22-%E7%9A%84%E7%A1%AC%E7%BC%96%E7%A0%81%E5%90%AF%E5%8F%91%E5%BC%8F%EF%BC%88D7%EF%BC%89">5. <code>algorithm="auto"</code> 的硬编码启发式（D7）<a class="anchor-link" href="#5.-algorithm=%22auto%22-%E7%9A%84%E7%A1%AC%E7%BC%96%E7%A0%81%E5%90%AF%E5%8F%91%E5%BC%8F%EF%BC%88D7%EF%BC%89">¶</a></h2><p>课堂会说"数据多就用树、维度高就用暴力"，但<strong>具体阈值</strong>是 sklearn 写死在源码里的经验规则。<code>algorithm="auto"</code> 时（<code>_fit</code>，L586–619）：</p>
+<h2 id="5.-algorithm=%22auto%22-%E7%9A%84%E7%A1%AC%E7%BC%96%E7%A0%81%E5%90%AF%E5%8F%91%E5%BC%8F">5. <code>algorithm="auto"</code> 的硬编码启发式<a class="anchor-link" href="#5.-algorithm=%22auto%22-%E7%9A%84%E7%A1%AC%E7%BC%96%E7%A0%81%E5%90%AF%E5%8F%91%E5%BC%8F">¶</a></h2><p>理论上"数据多就用树、维度高就用暴力"，但<strong>具体阈值</strong>是 sklearn 写死在源码里的经验规则。<code>algorithm="auto"</code> 时（<code>_fit</code>，L586–619）：</p>
 <ul>
 <li><code>metric="precomputed"</code> → <code>brute</code></li>
 <li><code>n_features &gt; 15</code> → <code>brute</code></li>
@@ -8063,13 +8064,7 @@ BallTree 比 KDTree 多出: ['braycurtis', 'canberra', 'dice', 'hamming', 'haver
     n_features= 2  -&gt;  kd_tree
     n_features=10  -&gt;  kd_tree
     n_features=15  -&gt;  kd_tree
-</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>    n_features=16  -&gt;  brute
+    n_features=16  -&gt;  brute
     n_features=30  -&gt;  brute
 
 随「n_neighbors」变化（n_features=2, n_samples=40，阈值是 40//2=20）：
@@ -8089,9 +8084,9 @@ BallTree 比 KDTree 多出: ['braycurtis', 'canberra', 'dice', 'hamming', 'haver
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="6.-%E8%B7%9D%E7%A6%BB%E7%9A%84%E7%AD%89%E4%BB%B7%E5%8F%98%E6%8D%A2%E4%B8%8E%E5%BA%A6%E9%87%8F%E7%89%B9%E5%8C%96%EF%BC%88D1-/-D2-/-D3%EF%BC%89">6. 距离的等价变换与度量特化（D1 / D2 / D3）<a class="anchor-link" href="#6.-%E8%B7%9D%E7%A6%BB%E7%9A%84%E7%AD%89%E4%BB%B7%E5%8F%98%E6%8D%A2%E4%B8%8E%E5%BA%A6%E9%87%8F%E7%89%B9%E5%8C%96%EF%BC%88D1-/-D2-/-D3%EF%BC%89">¶</a></h2><p><strong>D1｜平方欧氏 + 延迟开方。</strong> 找"最近的 k 个点"只需要距离的<strong>单调变换</strong>，不需要真实距离。于是 sklearn 的暴力路径全程用<strong>平方</strong>距离（<code>squared=True</code>），只在最后返回时开一次根。半径版更要注意：<code>radius *= radius</code> 才能和平方距离比较——这是容易写错的地方。</p>
-<p><strong>D2｜<code>effective_metric_</code> 特化坍缩。</strong> 用户写 <code>metric="minkowski", p=2</code>，sklearn 不会真的调用通用 minkowski，而是<strong>坍缩</strong>成 <code>manhattan</code>（p=1）/ <code>euclidean</code>（p=2）/ <code>chebyshev</code>（p=∞），走更快的专用实现；只有带权重 <code>w</code> 时才保留通用分支。</p>
-<p><strong>D3｜<code>0&lt;p&lt;1</code> 是半度量。</strong> <code>p&lt;1</code> 的 Minkowski 不满足三角不等式，树算法在<strong>数学上就不成立</strong>，所以被强制为 <code>brute</code>——把度量公理直接写进了工程约束。</p>
+<h2 id="6.-%E8%B7%9D%E7%A6%BB%E7%9A%84%E7%AD%89%E4%BB%B7%E5%8F%98%E6%8D%A2%E4%B8%8E%E5%BA%A6%E9%87%8F%E7%89%B9%E5%8C%96">6. 距离的等价变换与度量特化<a class="anchor-link" href="#6.-%E8%B7%9D%E7%A6%BB%E7%9A%84%E7%AD%89%E4%BB%B7%E5%8F%98%E6%8D%A2%E4%B8%8E%E5%BA%A6%E9%87%8F%E7%89%B9%E5%8C%96">¶</a></h2><p><strong>1｜平方欧氏 + 延迟开方。</strong> 找"最近的 k 个点"只需要距离的<strong>单调变换</strong>，不需要真实距离。于是 sklearn 的暴力路径全程用<strong>平方</strong>距离（<code>squared=True</code>），只在最后返回时开一次根。半径版更要注意：<code>radius *= radius</code> 才能和平方距离比较——这是容易写错的地方。</p>
+<p><strong>2｜<code>effective_metric_</code> 特化坍缩。</strong> 用户写 <code>metric="minkowski", p=2</code>，sklearn 不会真的调用通用 minkowski，而是<strong>坍缩</strong>成 <code>manhattan</code>（p=1）/ <code>euclidean</code>（p=2）/ <code>chebyshev</code>（p=∞），走更快的专用实现；只有带权重 <code>w</code> 时才保留通用分支。</p>
+<p><strong>3｜<code>0&lt;p&lt;1</code> 是半度量。</strong> <code>p&lt;1</code> 的 Minkowski 不满足三角不等式，树算法在<strong>数学上就不成立</strong>，所以被强制为 <code>brute</code>——把度量公理直接写进了工程约束。</p>
 </div>
 </div>
 </div>
@@ -8241,15 +8236,15 @@ p=0.5 时 algorithm='auto' 最终选择 : brute
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="7.-kneighbors-%E6%9F%A5%E8%AF%A2%E5%86%85%E6%A0%B8%EF%BC%9A%E5%9B%9B%E6%9D%A1%E6%89%A7%E8%A1%8C%E8%B7%AF%E5%BE%84%E4%B8%8E-Top-k%EF%BC%88D6-/-D12-/-D13-/-D14%EF%BC%89">7. <code>kneighbors</code> 查询内核：四条执行路径与 Top-k（D6 / D12 / D13 / D14）<a class="anchor-link" href="#7.-kneighbors-%E6%9F%A5%E8%AF%A2%E5%86%85%E6%A0%B8%EF%BC%9A%E5%9B%9B%E6%9D%A1%E6%89%A7%E8%A1%8C%E8%B7%AF%E5%BE%84%E4%B8%8E-Top-k%EF%BC%88D6-/-D12-/-D13-/-D14%EF%BC%89">¶</a></h2><p>一个 <code>kneighbors()</code> 内部其实有<strong>四条</strong>完全不同的执行路径：</p>
+<h2 id="7.-kneighbors-%E6%9F%A5%E8%AF%A2%E5%86%85%E6%A0%B8%EF%BC%9A%E5%9B%9B%E6%9D%A1%E6%89%A7%E8%A1%8C%E8%B7%AF%E5%BE%84%E4%B8%8E-Top-k">7. <code>kneighbors</code> 查询内核：四条执行路径与 Top-k<a class="anchor-link" href="#7.-kneighbors-%E6%9F%A5%E8%AF%A2%E5%86%85%E6%A0%B8%EF%BC%9A%E5%9B%9B%E6%9D%A1%E6%89%A7%E8%A1%8C%E8%B7%AF%E5%BE%84%E4%B8%8E-Top-k">¶</a></h2><p>一个 <code>kneighbors()</code> 内部其实有<strong>四条</strong>完全不同的执行路径：</p>
 <ol>
 <li><strong><code>ArgKmin</code> 快速路径</strong>：内置 metric + 暴力后端时，走 <code>PairwiseDistancesReductions</code>（Cython）；</li>
 <li><strong>稀疏预计算图</strong>：<code>metric="precomputed"</code> 且输入稀疏时，直接把图拆成距离/下标；</li>
 <li><strong>chunked 回退</strong>：用户自定义 <code>metric</code>（callable）时，退回 <code>pairwise_distances_chunked</code> + joblib；</li>
-<li><strong>树的线程分片</strong>：KDTree/BallTree 用 <code>Parallel(prefer="threads")</code>（吃 Cython 释放 GIL 的红利）。</li>
+<li><strong>树的线程分片</strong>：KDTree/BallTree 用 <code>Parallel(prefer="threads")</code>（结合 Cython 释放 GIL 的优势）。</li>
 </ol>
 <p>同一个 <code>n_jobs</code>，在路径 3 是<strong>多进程</strong>、在路径 4 是<strong>多线程</strong>，语义并不相同。</p>
-<p>Top-k 的取法也很"不一样"：用 <code>np.argpartition</code>（O(n) 选第 k 小）<strong>而不是全排序</strong>；但 <code>argpartition</code> <strong>只保证"选对"、不保证"排好"</strong>，所以必须再对 k 个做一次小排序，否则结果顺序是错的。</p>
+<p>Top-k 的取法也很特别：用 <code>np.argpartition</code>（O(n) 选第 k 小）<strong>而不是全排序</strong>；但 <code>argpartition</code> <strong>只保证"选对"、不保证"排好"</strong>，所以必须再对 k 个做一次小排序，否则结果顺序是错的。</p>
 </div>
 </div>
 </div>
@@ -8429,7 +8424,7 @@ p=0.5 时 algorithm='auto' 最终选择 : brute
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="8.-%E4%B8%BA%E4%BB%80%E4%B9%88%E4%B8%8D%E7%89%A9%E5%8C%96-n%C3%97m-%E8%B7%9D%E7%A6%BB%E7%9F%A9%E9%98%B5%EF%BC%88D12%EF%BC%89">8. 为什么不物化 n×m 距离矩阵（D12）<a class="anchor-link" href="#8.-%E4%B8%BA%E4%BB%80%E4%B9%88%E4%B8%8D%E7%89%A9%E5%8C%96-n%C3%97m-%E8%B7%9D%E7%A6%BB%E7%9F%A9%E9%98%B5%EF%BC%88D12%EF%BC%89">¶</a></h2><p>朴素实现会先算出整张 <code>n_query × n_train</code> 的距离矩阵再排序——内存 O(n·m)，大数据直接爆。sklearn 1.x 引入 <code>PairwiseDistancesReductions</code>（<code>ArgKmin</code> / <code>RadiusNeighbors</code> / <code>ArgKminClassMode</code>）：<strong>分块计算 + 边算边归约</strong>，从不生成完整距离矩阵。</p>
+<h2 id="8.-%E4%B8%BA%E4%BB%80%E4%B9%88%E4%B8%8D%E7%89%A9%E5%8C%96-n%C3%97m-%E8%B7%9D%E7%A6%BB%E7%9F%A9%E9%98%B5">8. 为什么不物化 n×m 距离矩阵<a class="anchor-link" href="#8.-%E4%B8%BA%E4%BB%80%E4%B9%88%E4%B8%8D%E7%89%A9%E5%8C%96-n%C3%97m-%E8%B7%9D%E7%A6%BB%E7%9F%A9%E9%98%B5">¶</a></h2><p>朴素实现会先算出整张 <code>n_query × n_train</code> 的距离矩阵再排序——内存 O(n·m)，大数据直接爆。sklearn 引入 <code>PairwiseDistancesReductions</code>（<code>ArgKmin</code> / <code>RadiusNeighbors</code> / <code>ArgKminClassMode</code>）：<strong>分块计算 + 边算边归约</strong>，从不生成完整距离矩阵。</p>
 <p>代价是<strong>只有内置 metric + 暴力后端</strong>才能进这条快路径；一旦 <code>metric</code> 是 callable，就只能退回 chunked + joblib 的通用路径。下面用计时直观对比这两条路径。</p>
 </div>
 </div>
@@ -8478,8 +8473,8 @@ p=0.5 时 algorithm='auto' 最终选择 : brute
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>内置 euclidean（ArgKmin 快路径）    : 0.008 s
-callable metric（chunked 通用路径）: 1.254 s
+<pre>内置 euclidean（ArgKmin 快路径）    : 0.017 s
+callable metric（chunked 通用路径）: 1.386 s
 
 </pre>
 </div>
@@ -8500,9 +8495,9 @@ callable metric（chunked 通用路径）: 1.254 s
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="9.-%E6%9D%83%E9%87%8D%E8%AF%AD%E4%B9%89%E4%B8%8E%E5%8D%8A%E5%BE%84%E7%89%88%E7%9A%84%E5%8F%98%E9%95%BF%E9%82%BB%E5%B1%85%EF%BC%88D4-/-D5-/-D9%EF%BC%89">9. 权重语义与半径版的变长邻居（D4 / D5 / D9）<a class="anchor-link" href="#9.-%E6%9D%83%E9%87%8D%E8%AF%AD%E4%B9%89%E4%B8%8E%E5%8D%8A%E5%BE%84%E7%89%88%E7%9A%84%E5%8F%98%E9%95%BF%E9%82%BB%E5%B1%85%EF%BC%88D4-/-D5-/-D9%EF%BC%89">¶</a></h2><p><strong>D4｜<code>weights='distance'</code> 的零距离语义。</strong> 教材常写 <code>1/(d+ε)</code>，sklearn 不是这么做的：若查询点与某些训练点<strong>距离为 0</strong>（完全重合），它把<strong>这些点的权重置 1、其余全部置 0</strong>——直接让重合点"一票定音"。还有一个 <code>object dtype</code> 分支，专门用来接半径分类器给离群点打的哨兵值。</p>
-<p><strong>D5｜半径结果用稳定排序。</strong> <code>sort_results=True</code> 时用 <code>np.argsort(kind="mergesort")</code>，保证<strong>等距邻居的顺序确定</strong>（固定 k 的路径则不做这个保证）。</p>
-<p><strong>D9｜半径版是变长数组。</strong> 固定 k 版返回规则的二维块 <code>(n, k)</code>；半径版邻居数不定，只能造 <strong>object ndarray</strong>（每个元素是一个数组），两套实现完全不同。</p>
+<h2 id="9.-%E6%9D%83%E9%87%8D%E8%AF%AD%E4%B9%89%E4%B8%8E%E5%8D%8A%E5%BE%84%E7%89%88%E7%9A%84%E5%8F%98%E9%95%BF%E9%82%BB%E5%B1%85">9. 权重语义与半径版的变长邻居<a class="anchor-link" href="#9.-%E6%9D%83%E9%87%8D%E8%AF%AD%E4%B9%89%E4%B8%8E%E5%8D%8A%E5%BE%84%E7%89%88%E7%9A%84%E5%8F%98%E9%95%BF%E9%82%BB%E5%B1%85">¶</a></h2><p><strong>1｜<code>weights='distance'</code> 的零距离语义。</strong> 常见做法是使用 <code>1/(d+ε)</code>，sklearn 不是这么做的：若查询点与某些训练点<strong>距离为 0</strong>（完全重合），它把<strong>这些点的权重置 1、其余全部置 0</strong>——直接让重合点"一票定音"。还有一个 <code>object dtype</code> 分支，专门用来接半径分类器给离群点打的哨兵值。</p>
+<p><strong>2｜半径结果用稳定排序。</strong> <code>sort_results=True</code> 时用 <code>np.argsort(kind="mergesort")</code>，保证<strong>等距邻居的顺序确定</strong>（固定 k 的路径则不做这个保证）。</p>
+<p><strong>3｜半径版是变长数组。</strong> 固定 k 版返回规则的二维块 <code>(n, k)</code>；半径版邻居数不定，只能造 <strong>object ndarray</strong>（每个元素是一个数组），两套实现完全不同。</p>
 </div>
 </div>
 </div>
@@ -8648,9 +8643,9 @@ radius_neighbors 返回 dtype : object  shape: (20,)
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="10.-KNN-%E5%8F%AF%E4%BB%A5%E3%80%8C%E6%B2%A1%E6%9C%89%E5%9D%90%E6%A0%87%E3%80%8D%EF%BC%9A%E9%A2%84%E8%AE%A1%E7%AE%97%E7%A8%80%E7%96%8F%E5%9B%BE%EF%BC%88D8-/-D16%EF%BC%89">10. KNN 可以「没有坐标」：预计算稀疏图（D8 / D16）<a class="anchor-link" href="#10.-KNN-%E5%8F%AF%E4%BB%A5%E3%80%8C%E6%B2%A1%E6%9C%89%E5%9D%90%E6%A0%87%E3%80%8D%EF%BC%9A%E9%A2%84%E8%AE%A1%E7%AE%97%E7%A8%80%E7%96%8F%E5%9B%BE%EF%BC%88D8-/-D16%EF%BC%89">¶</a></h2><p>KNN 的输入不一定要是"坐标点"。只要给出<strong>样本两两的距离</strong>，就能做近邻搜索——<code>metric="precomputed"</code> 就是入口。当这个距离矩阵是<strong>稀疏</strong>的，sklearn 把它当<strong>图</strong>用：<strong>只有非零元才是候选邻居</strong>。</p>
+<h2 id="10.-KNN-%E5%8F%AF%E4%BB%A5%E3%80%8C%E6%B2%A1%E6%9C%89%E5%9D%90%E6%A0%87%E3%80%8D%EF%BC%9A%E9%A2%84%E8%AE%A1%E7%AE%97%E7%A8%80%E7%96%8F%E5%9B%BE">10. KNN 可以「没有坐标」：预计算稀疏图<a class="anchor-link" href="#10.-KNN-%E5%8F%AF%E4%BB%A5%E3%80%8C%E6%B2%A1%E6%9C%89%E5%9D%90%E6%A0%87%E3%80%8D%EF%BC%9A%E9%A2%84%E8%AE%A1%E7%AE%97%E7%A8%80%E7%96%8F%E5%9B%BE">¶</a></h2><p>KNN 的输入不一定要是"坐标点"。只要给出<strong>样本两两的距离</strong>，就能做近邻搜索——<code>metric="precomputed"</code> 就是入口。当这个距离矩阵是<strong>稀疏</strong>的，sklearn 把它当<strong>图</strong>用：<strong>只有非零元才是候选邻居</strong>。</p>
 <p>内部实现有个漂亮的技巧（<code>_kneighbors_from_graph</code>，L315–322）：CSR 图每行的邻居个数可能不等（ragged），不能直接 reshape。代码用 <code>np.take(..., mode="clip")</code> 构造一个"越界就重复最后一个元素"的索引，把 ragged 结构<strong>压平成规则块</strong> <code>(n, k)</code>；同时还有守卫：某行邻居数少于 <code>n_neighbors</code> 就直接报错。</p>
-<p>顺带一个细节（D16）：<code>KNeighborsTransformer</code> 在 <code>mode="distance"</code> 时要<strong>多取 1 个邻居</strong>（<code>add_one = mode == "distance"</code>），因为对角线（自身、距离 0）总会被显式写回。</p>
+<p>注：<code>KNeighborsTransformer</code> 在 <code>mode="distance"</code> 时要<strong>多取 1 个邻居</strong>（<code>add_one = mode == "distance"</code>），因为对角线（自身、距离 0）总会被显式写回。</p>
 </div>
 </div>
 </div>
@@ -8777,7 +8772,7 @@ radius_neighbors 返回 dtype : object  shape: (20,)
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="11.-%E5%88%86%E7%B1%BB-/-%E5%9B%9E%E5%BD%92%E8%81%9A%E5%90%88%EF%BC%9A%E4%BB%85%E4%BD%9C%E4%B8%80%E4%B8%AA%E5%91%BC%E5%BA%94%E5%AE%9E%E9%AA%8C%EF%BC%88D15%EF%BC%89">11. 分类 / 回归聚合：仅作一个呼应实验（D15）<a class="anchor-link" href="#11.-%E5%88%86%E7%B1%BB-/-%E5%9B%9E%E5%BD%92%E8%81%9A%E5%90%88%EF%BC%9A%E4%BB%85%E4%BD%9C%E4%B8%80%E4%B8%AA%E5%91%BC%E5%BA%94%E5%AE%9E%E9%AA%8C%EF%BC%88D15%EF%BC%89">¶</a></h2><p>投票与加权投票课上已经讲过，这里只补实现里一个<strong>不寻常的设计</strong>：半径分类器允许"找不到任何邻居"，这种点被当作<strong>离群点</strong>，用 <code>outlier_label</code> 兜底（默认 <code>-1</code>）。它的判定方式是"<strong>概率行全为 0</strong>"，与第 9 节 <code>_get_weights</code> 的 <code>object</code> 哨兵分支是同一套机制。</p>
+<h2 id="11.-%E5%88%86%E7%B1%BB-/-%E5%9B%9E%E5%BD%92%E8%81%9A%E5%90%88%EF%BC%9A%E5%91%BC%E5%BA%94%E5%AE%9E%E9%AA%8C">11. 分类 / 回归聚合：呼应实验<a class="anchor-link" href="#11.-%E5%88%86%E7%B1%BB-/-%E5%9B%9E%E5%BD%92%E8%81%9A%E5%90%88%EF%BC%9A%E5%91%BC%E5%BA%94%E5%AE%9E%E9%AA%8C">¶</a></h2><p>这里补充实现里一个<strong>不寻常的设计</strong>：半径分类器允许"找不到任何邻居"，这种点被当作<strong>离群点</strong>，用 <code>outlier_label</code> 兜底（默认 <code>-1</code>）。它的判定方式是"<strong>概率行全为 0</strong>"，与第 9 节 <code>_get_weights</code> 的 <code>object</code> 哨兵分支是同一套机制。</p>
 </div>
 </div>
 </div>
@@ -8843,12 +8838,12 @@ radius_neighbors 返回 dtype : object  shape: (20,)
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="12.-%E3%80%8C%E4%B8%8D%E5%A4%AA%E4%B8%80%E6%A0%B7%E3%80%8D%E5%AE%9E%E9%AA%8C%E9%9B%86-+-LOF-%E5%BB%B6%E4%BC%B8">12. 「不太一样」实验集 + LOF 延伸<a class="anchor-link" href="#12.-%E3%80%8C%E4%B8%8D%E5%A4%AA%E4%B8%80%E6%A0%B7%E3%80%8D%E5%AE%9E%E9%AA%8C%E9%9B%86-+-LOF-%E5%BB%B6%E4%BC%B8">¶</a></h2><p>把前面散落的点汇总成两组实验：</p>
+<h2 id="12.-%E5%AE%9E%E9%AA%8C%E9%9B%86-+-LOF-%E5%BB%B6%E4%BC%B8">12. 实验集 + LOF 延伸<a class="anchor-link" href="#12.-%E5%AE%9E%E9%AA%8C%E9%9B%86-+-LOF-%E5%BB%B6%E4%BC%B8">¶</a></h2><p>把前面的细节汇总成两组实验：</p>
 <ol>
 <li><strong>三后端一致性</strong>：同一数据下 <code>brute</code> / <code>kd_tree</code> / <code>ball_tree</code> 的预测必须完全一致；</li>
 <li><strong>耗时随维度翻转</strong>：低维树快、高维暴力快——这正是 <code>algorithm="auto"</code> 想自动踩中的拐点。</li>
 </ol>
-<p>最后用一个 KNN 思想的延伸算法收尾：<strong>LOF（局部离群因子）</strong>。它把"k-近邻距离 → 可达距离 → 局部可达密度"层层套用，是"局部邻域密度"的完整演绎。</p>
+<p>用一个 KNN 思想的延伸算法作结尾：<strong>LOF（局部离群因子）</strong>。它把"k-近邻距离 → 可达距离 → 局部可达密度"层层套用，是"局部邻域密度"的完整演绎。</p>
 </div>
 </div>
 </div>
@@ -8902,22 +8897,22 @@ radius_neighbors 返回 dtype : object  shape: (20,)
 <pre>三后端预测一致: True
 
 n_features | kd_tree(s) |   brute(s) | auto picks
-         2 |      0.002 |      0.008 | kd_tree
-         5 |      0.009 |      0.007 | kd_tree
+         2 |      0.003 |      0.010 | kd_tree
+         5 |      0.008 |      0.008 | kd_tree
 </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>        15 |      0.084 |      0.008 | kd_tree
+<pre>        15 |      0.094 |      0.008 | kd_tree
 </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>        50 |      0.202 |      0.013 | brute
+<pre>        50 |      0.222 |      0.015 | brute
 </pre>
 </div>
 </div>
@@ -8998,13 +8993,11 @@ negative_outlier_factor_ 越小越异常，前 5 个: [-1.004 -1.172 -0.997 -1.2
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="13.-%E5%B0%8F%E7%BB%93">13. 小结<a class="anchor-link" href="#13.-%E5%B0%8F%E7%BB%93">¶</a></h2><p>把这次读到的「不一样」串成一条线：</p>
-<ul>
+<h2 id="13.-%E5%B0%8F%E7%BB%93">13. 小结<a class="anchor-link" href="#13.-%E5%B0%8F%E7%BB%93">¶</a></h2><ul>
 <li><strong>数学层</strong>：距离只在需要时才算真实值（平方欧氏 + 延迟开方、<code>radius *= radius</code>）；metric 会按 <code>p</code> 坍缩特化；<code>p&lt;1</code> 因为半度量被禁树；零距离样本在 <code>distance</code> 权重下被"一票定音"；半径结果稳定排序。</li>
 <li><strong>数据结构层</strong>：Top-k 用 <code>argpartition</code> 而非排序（但必须补一次小排序）；<code>auto</code> 的阈值是硬编码经验；稀疏距离矩阵可当图，ragged 用 <code>np.take(mode="clip")</code> 压平；半径版返回 object 数组。</li>
 <li><strong>架构层</strong>：<code>fit</code> 只建索引、索引可跨模型复用；抽象基类 + Mixin 组合；<code>kneighbors</code> 分四条路径，<code>n_jobs</code> 语义随后端而变；<code>query==train</code> 的自身排除与重复点边界；离群点用"全零概率"判定。</li>
 </ul>
-<p>一句话：<strong>KNN 的"算法"很简单，难的是让它在大规模数据上又对又快——sklearn 把这些难点全都沉淀成了实现细节。</strong></p>
 </div>
 </div>
 </div>
