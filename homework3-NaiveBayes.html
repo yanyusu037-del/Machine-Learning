@@ -7586,7 +7586,7 @@ source  : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/naive_
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="2.-%E9%AA%A8%E6%9E%B6%EF%BC%9A%E4%B8%89%E7%BA%A7%E7%BB%A7%E6%89%BF-+-%E6%A8%A1%E6%9D%BF%E6%96%B9%E6%B3%95">2. 骨架：三级继承 + 模板方法<a class="anchor-link" href="#2.-%E9%AA%A8%E6%9E%B6%EF%BC%9A%E4%B8%89%E7%BA%A7%E7%BB%A7%E6%89%BF-+-%E6%A8%A1%E6%9D%BF%E6%96%B9%E6%B3%95">¶</a></h2><p><code>naive_bayes.py</code> 的继承结构（括号内为 1.3.2 行号，仅便于定位）：</p>
+<h2 id="2.-%E9%AA%A8%E6%9E%B6%EF%BC%9A%E4%B8%89%E7%BA%A7%E7%BB%A7%E6%89%BF-+-%E6%A8%A1%E6%9D%BF%E6%96%B9%E6%B3%95">2. 骨架：三级继承 + 模板方法<a class="anchor-link" href="#2.-%E9%AA%A8%E6%9E%B6%EF%BC%9A%E4%B8%89%E7%BA%A7%E7%BB%A7%E6%89%BF-+-%E6%A8%A1%E6%9D%BF%E6%96%B9%E6%B3%95">¶</a></h2><p><code>naive_bayes.py</code> 的继承结构：</p>
 <pre><code>_BaseNB(ABC)                      —— 抽象 _joint_log_likelihood / _check_X
 ├── GaussianNB                    —— 连续型，直接挂 _BaseNB
 └── _BaseDiscreteNB(ABC)          —— 再加抽象 _count / _update_feature_log_prob
@@ -7866,7 +7866,7 @@ predict 只是 argmax   : True
 <h2 id="4.-%E7%A6%BB%E6%95%A3%E6%97%8F%E7%9A%84%E6%B5%81%E6%B0%B4%E7%BA%BF%EF%BC%9A%E8%AE%A1%E6%95%B0-%E2%86%92-%E5%B9%B3%E6%BB%91-%E2%86%92-%E5%85%88%E9%AA%8C">4. 离散族的流水线：计数 → 平滑 → 先验<a class="anchor-link" href="#4.-%E7%A6%BB%E6%95%A3%E6%97%8F%E7%9A%84%E6%B5%81%E6%B0%B4%E7%BA%BF%EF%BC%9A%E8%AE%A1%E6%95%B0-%E2%86%92-%E5%B9%B3%E6%BB%91-%E2%86%92-%E5%85%88%E9%AA%8C">¶</a></h2><p><code>_BaseDiscreteNB</code> 把离散模型共用的三步只写一遍（<code>fit</code> 与 <code>partial_fit</code> 都调用）：</p>
 <ol>
 <li><code>_count(X, Y)</code>：累加 <code>class_count_</code> / <code>feature_count_</code>（<strong>子类各自实现</strong>）；</li>
-<li><code>_check_alpha()</code> → <code>_update_feature_log_prob(alpha)</code>：平滑后算 <code>log P(x_i|y)</code>（<strong>子类各自实现</strong>）；</li>
+<li><code>_check_alpha()</code>（基类统一实现）→ <code>_update_feature_log_prob(alpha)</code>（子类各自实现）：平滑后算 <code>log P(x_i|y)</code>；</li>
 <li><code>_update_class_log_prior(class_prior)</code>：算 <code>log P(y)</code>（<strong>基类统一实现</strong>）。</li>
 </ol>
 <p><code>_update_class_log_prior</code> 还藏了两个细节：<code>fit_prior=False</code> 时先验退化为均匀分布的 log 值 <code>−log(n_classes)</code>；某类未被观测时 <code>log(0)</code> 的 RuntimeWarning 被显式静默。</p>
@@ -8174,7 +8174,7 @@ class_count_   一致: True
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="6.-GaussianNB-%E7%9A%84%E5%9C%A8%E7%BA%BF%E5%90%88%E5%B9%B6-%E2%80%94%E2%80%94-Chan-Golub-LeVeque">6. GaussianNB 的在线合并 —— Chan-Golub-LeVeque<a class="anchor-link" href="#6.-GaussianNB-%E7%9A%84%E5%9C%A8%E7%BA%BF%E5%90%88%E5%B9%B6-%E2%80%94%E2%80%94-Chan-Golub-LeVeque">¶</a></h2><p>常见的方差公式是 $\frac{1}{n}\sum(x-\mu)^2$，一次性算完。为了支持 <code>partial_fit</code>（在线学习），sklearn 不保存任何历史样本，直接合并旧统计量 + 新一：</p>
+<h2 id="6.-GaussianNB-%E7%9A%84%E5%9C%A8%E7%BA%BF%E5%90%88%E5%B9%B6-%E2%80%94%E2%80%94-Chan-Golub-LeVeque">6. GaussianNB 的在线合并 —— Chan-Golub-LeVeque<a class="anchor-link" href="#6.-GaussianNB-%E7%9A%84%E5%9C%A8%E7%BA%BF%E5%90%88%E5%B9%B6-%E2%80%94%E2%80%94-Chan-Golub-LeVeque">¶</a></h2><p>常见的方差公式是 $\frac{1}{n}\sum(x-\mu)^2$，一次性算完。为了支持 <code>partial_fit</code>（在线学习），sklearn 不保存任何历史样本，直接合并旧统计量 + 新一批：</p>
 <p>$$
 \mu_{total}=\frac{n_{new}\mu_{new}+n_{past}\mu_{past}}{n_{total}},\qquad
 SSD_{total}=SSD_{old}+SSD_{new}+\frac{n_{new}\,n_{past}}{n_{total}}\left(\mu_{past}-\mu_{new}\right)^2
@@ -8339,10 +8339,10 @@ max|Δvar_|   = 1.6842549577233967e-10
 <pre><code>epsilon_ = var_smoothing * var(X, axis=0).max()
 ...
 非首次 partial_fit:  self.var_[:, :] -= self.epsilon_   # 先扣掉
-    ... 用干净的方差做 H1 的在线合并 ...
+    ... 用干净的方差做第 6 节的在线合并 ...
                      self.var_[:, :] += self.epsilon_   # 再加回
 </code></pre>
-<p>若把「已加 epsilon」的方差直接喂进6节的合并公式，epsilon 会被 <code>n_past·var</code> 项放大，并随每次 <code>partial_fit</code> 越滚越大。</p>
+<p>若把「已加 epsilon」的方差直接喂进第 6 节的合并公式，epsilon 会被 <code>n_past·var</code> 项放大，并随每次 <code>partial_fit</code> 越滚越大。</p>
 <blockquote>
 <p>注意：<code>epsilon_</code> 每次 <code>partial_fit</code> 都按<strong>当前批次</strong>重算（<code>var_smoothing * var(X_batch).max()</code>），所以严格说是「扣掉本批次的平滑量」。对同分布的批量数据前后 epsilon 近似相等，先减后加就能让合并公式拿到「干净」的方差。</p>
 </blockquote>
@@ -8476,6 +8476,9 @@ max|Δvar_|   = 1.6842549577233967e-10
 <p>朴素写法要构造 <code>(1-X)</code> 这个矩阵；sklearn 用恒等式</p>
 <p>$$\sum_i (1-x_i)\log(1-p_i)=\sum_i\log(1-p_i)-\sum_i x_i\log(1-p_i)$$</p>
 <p>把它化简成<strong>一次稀疏点积 + 一个常数项</strong>：</p>
+<div class="highlight"><pre><span></span><span class="n">neg_prob</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">feature_log_prob_</span><span class="p">))</span>
+<span class="n">jll</span> <span class="o">=</span> <span class="n">X</span> <span class="o">@</span> <span class="p">(</span><span class="n">feature_log_prob_</span> <span class="o">-</span> <span class="n">neg_prob</span><span class="p">)</span><span class="o">.</span><span class="n">T</span> <span class="o">+</span> <span class="n">class_log_prior_</span> <span class="o">+</span> <span class="n">neg_prob</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+</pre></div>
 <p>好处：<strong>不物化 <code>(1-X)</code></strong>，直接支持 CSR 稀疏输入。</p>
 </div>
 </div>
@@ -8575,12 +8578,12 @@ max|Δvar_|   = 1.6842549577233967e-10
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="9.-ComplementNB-%E7%94%A8%E4%B8%80%E4%B8%AA%E8%B4%9F%E5%8F%B7%E6%8A%8A-argmin-%E6%8A%98%E8%BF%9B-argmax">9. ComplementNB 用一个负号把 argmin 折进 argmax<a class="anchor-link" href="#9.-ComplementNB-%E7%94%A8%E4%B8%80%E4%B8%AA%E8%B4%9F%E5%8F%B7%E6%8A%8A-argmin-%E6%8A%98%E8%BF%9B-argmax">¶</a></h2><p>Complement NB（Rennie et al. 2003）为类别不平衡设计，算法上是<strong>最小化「补集」的权重</strong></p>
+<h2 id="9.-ComplementNB-%E7%94%A8%E4%B8%80%E4%B8%AA%E8%B4%9F%E5%8F%B7%E6%8A%8A-argmin-%E6%8A%98%E8%BF%9B-argmax">9. ComplementNB 用一个负号把 argmin 折进 argmax<a class="anchor-link" href="#9.-ComplementNB-%E7%94%A8%E4%B8%80%E4%B8%AA%E8%B4%9F%E5%8F%B7%E6%8A%8A-argmin-%E6%8A%98%E8%BF%9B-argmax">¶</a></h2><p>Complement NB（Rennie et al. 2003）为类别不平衡设计，算法上是<strong>最小化「补集」的权重</strong>。</p>
 <p>问题：基类 <code>predict</code> 写死用 <strong>argmax</strong>。sklearn 的解法是<strong>把权重取负</strong>：</p>
 <div class="highlight"><pre><span></span><span class="c1"># _BaseNB.predict uses argmax, but ComplementNB operates with argmin.</span>
 <span class="n">feature_log_prob_</span> <span class="o">=</span> <span class="o">-</span><span class="n">logged</span>     <span class="c1"># 于是 argmax(-s) ≡ argmin(s)</span>
 </pre></div>
-<p>可以开启 <code>norm=True</code> 选择符合Complement NB论文的计算方式。</p>
+<p>默认 <code>norm=False</code>（Mahout/Weka 的口味）；开启 <code>norm=True</code> 可切换到 Complement NB 论文（Rennie et al. 2003, Table 9）的计算方式。</p>
 </div>
 </div>
 </div>
@@ -8688,7 +8691,7 @@ norm=True  预测 [:12]: [0 0 0 0 1 0 0 1 0 0 0 1]
 <li>计数用 <code>np.bincount(X_feature[mask], weights=weights)</code>（按类掩码 + 加权直方图）；</li>
 <li><code>_joint_log_likelihood</code> 用花式索引 <code>feature_log_prob_[i][:, indices].T</code>。</li>
 </ul>
-<p>注：<code>_check_alpha</code> 在 alpha 上叠了「逐特征配置 + 1e-10 下限 + <code>force_alpha</code> 弃用过渡」三层逻辑，而且 **docstring 写 <code>default=False</code>。</p>
+<p>注：<code>_check_alpha</code> 在 alpha 上叠了「逐特征配置 + 1e-10 下限 + <code>force_alpha</code> 弃用过渡」三层逻辑，而且 <strong>docstring 写 <code>default=False</code>，签名默认值却已是 <code>"warn"</code></strong>。</p>
 </div>
 </div>
 </div>
