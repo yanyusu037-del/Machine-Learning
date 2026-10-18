@@ -7654,8 +7654,8 @@ _BaseDiscreteNB 的抽象方法: ['_count', '_joint_log_likelihood', '_update_fe
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h2 id="3.-_joint_log_likelihood-%E7%9A%84%E5%9B%9B%E4%B8%AA%E5%85%AC%E5%BC%80%E6%96%B9%E6%B3%95">3. <code>_joint_log_likelihood</code> 的四个公开方法<a class="anchor-link" href="#3.-_joint_log_likelihood-%E7%9A%84%E5%9B%9B%E4%B8%AA%E5%85%AC%E5%BC%80%E6%96%B9%E6%B3%95">¶</a></h2><p>四个公开方法的实现都只有几行，差别仅在是否归一化 / 在哪个域归一化：</p>
 <ul>
-<li><code>predict</code> = <code>classes_[argmax(jll)]</code> —— <strong>不做归一化</strong>，因为 argmax 与常数无关；</li>
-<li><code>predict_log_proba</code> = <code>jll − logsumexp(jll, axis=1)</code> —— 在<strong>对数域</strong>归一化；</li>
+<li><code>predict</code> = <code>classes_[argmax(jll)]</code> <strong>不归一化</strong>，argmax 与常数无关；</li>
+<li><code>predict_log_proba</code> = <code>jll − logsumexp(jll, axis=1)</code> 在<strong>对数域</strong>归一化；</li>
 <li><code>predict_proba</code> = <code>exp(predict_log_proba)</code>；</li>
 <li><code>predict_joint_log_proba</code> 直接把未归一化的 <code>jll</code> 暴露出来。</li>
 </ul>
@@ -7791,12 +7791,11 @@ _BaseNB.predict_proba
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p><code>predict_log_proba</code> 里的归一分母是 <code>logsumexp</code>，值得单独说清。</p>
-<p><strong>定义</strong>：$\mathrm{logsumexp}(x)=\log\sum_i e^{x_i}$，就是「log 域里的求和」。直觉写法是两步 —— <code>np.log(np.sum(np.exp(x)))</code>。</p>
-<p><strong>为什么不能直接两步算</strong>：<code>exp</code> 稍微偏离 0 就会出事 —— 输入偏大上溢成 <code>inf</code>、偏小下溢成 <code>0</code>，前者 <code>log(inf)=inf</code>，后者 <code>log(0)=-inf</code>。而高维高斯的 <code>jll</code> 恰好是一两万的极小负数，必然踩坑。</p>
+<p>$\mathrm{logsumexp}(x)=\log\sum_i e^{x_i}$，就是「log 域里的求和」。直觉写法是两步 —— <code>np.log(np.sum(np.exp(x)))</code>。</p>
+<p><strong>为什么不能直接两步算</strong>：<code>exp</code> 稍微偏离 0 容易导致溢出 —— 输入偏大上溢成 <code>inf</code>、偏小下溢成 <code>0</code>，前者 <code>log(inf)=inf</code>，后者 <code>log(0)=-inf</code>。而高维高斯的 <code>jll</code> 恰好是一两万的极小负数，必然踩坑。</p>
 <p><strong>稳定化</strong>：注意到对任意常数 $m$ 都有</p>
 <p>$$\log\sum_i e^{x_i}=m+\log\sum_i e^{x_i-m}.$$</p>
-<p>取 $m=\max_i x_i$ 后，每一项 $e^{x_i-m}\le 1$、且至少有一项 $=1$，于是既不上溢、求和后取 log 也不会撞到 0。scipy 的实现正是这个套路。</p>
+<p>取 $m=\max_i x_i$ 后，每一项 $e^{x_i-m}\le 1$、且至少有一项 $=1$，于是既不上溢、求和后取 log 也不会撞到 0。scipy 中的实现如下。</p>
 </div>
 </div>
 </div>
@@ -7827,8 +7826,8 @@ _BaseNB.predict_proba
 <span class="n">small</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="o">-</span><span class="mf">1000.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">1001.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">1002.0</span><span class="p">])</span>   <span class="c1"># exp 全部下溢</span>
 <span class="n">large</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span> <span class="mf">1000.0</span><span class="p">,</span>  <span class="mf">1001.0</span><span class="p">])</span>            <span class="c1"># exp 全部上溢</span>
 <span class="k">with</span> <span class="n">np</span><span class="o">.</span><span class="n">errstate</span><span class="p">(</span><span class="nb">all</span><span class="o">=</span><span class="s2">"ignore"</span><span class="p">):</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">天真版  小值 :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">small</span><span class="p">))),</span> <span class="s2">"  &lt;- log(0) = -inf"</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">"天真版  大值 :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">large</span><span class="p">))),</span> <span class="s2">"  &lt;- log(inf) = inf"</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">理论版  小值 :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">small</span><span class="p">))),</span> <span class="s2">"  &lt;- log(0) = -inf"</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"理论版  大值 :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">large</span><span class="p">))),</span> <span class="s2">"  &lt;- log(inf) = inf"</span><span class="p">)</span>
 
 <span class="nb">print</span><span class="p">(</span><span class="s2">"稳定版  小值 :"</span><span class="p">,</span> <span class="n">as_scalar</span><span class="p">(</span><span class="n">my_logsumexp</span><span class="p">(</span><span class="n">small</span><span class="p">)),</span> <span class="s2">"== scipy:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">isclose</span><span class="p">(</span><span class="n">as_scalar</span><span class="p">(</span><span class="n">my_logsumexp</span><span class="p">(</span><span class="n">small</span><span class="p">)),</span> <span class="n">logsumexp</span><span class="p">(</span><span class="n">small</span><span class="p">)))</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"稳定版  大值 :"</span><span class="p">,</span> <span class="n">as_scalar</span><span class="p">(</span><span class="n">my_logsumexp</span><span class="p">(</span><span class="n">large</span><span class="p">)),</span> <span class="s2">"== scipy:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">isclose</span><span class="p">(</span><span class="n">as_scalar</span><span class="p">(</span><span class="n">my_logsumexp</span><span class="p">(</span><span class="n">large</span><span class="p">)),</span> <span class="n">logsumexp</span><span class="p">(</span><span class="n">large</span><span class="p">)))</span>
@@ -7873,8 +7872,8 @@ _BaseNB.predict_proba
         a_max = np.squeeze(a_max, axis=axis)
     out += a_max
 
-天真版  小值 : -inf   &lt;- log(0) = -inf
-天真版  大值 : inf   &lt;- log(inf) = inf
+理论版  小值 : -inf   &lt;- log(0) = -inf
+理论版  大值 : inf   &lt;- log(inf) = inf
 稳定版  小值 : -999.5923940355556 == scipy: True
 稳定版  大值 : 1001.3132616875182 == scipy: True
 axis=1 手写 == scipy: True
@@ -7947,7 +7946,7 @@ predict 只是 argmax   : True
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>/tmp/ipykernel_71355/3200229934.py:12: RuntimeWarning: invalid value encountered in divide
+<pre>/tmp/ipykernel_82712/3200229934.py:12: RuntimeWarning: invalid value encountered in divide
   naive = naive / naive.sum(axis=1, keepdims=True)
 </pre>
 </div>
@@ -7967,7 +7966,7 @@ predict 只是 argmax   : True
 <li><code>_check_alpha()</code>（基类统一实现）→ <code>_update_feature_log_prob(alpha)</code>（子类各自实现）：平滑后算 <code>log P(x_i|y)</code>；</li>
 <li><code>_update_class_log_prior(class_prior)</code>：算 <code>log P(y)</code>（<strong>基类统一实现</strong>）。</li>
 </ol>
-<p><code>_update_class_log_prior</code> 还藏了两个细节：<code>fit_prior=False</code> 时先验退化为均匀分布的 log 值 <code>−log(n_classes)</code>；某类未被观测时 <code>log(0)</code> 的 RuntimeWarning 被显式静默。</p>
+<p><code>_update_class_log_prior</code> 中的两个细节：<code>fit_prior=False</code> 时先验退化为均匀分布的 log 值 <code>−log(n_classes)</code>；某类未被观测时 <code>log(0)</code> 的 RuntimeWarning 被显式静默。</p>
 </div>
 </div>
 </div>
@@ -8129,10 +8128,10 @@ predict 只是 argmax   : True
 <span class="n">Y</span> <span class="o">*=</span> <span class="n">sample_weight</span><span class="o">.</span><span class="n">T</span>                      <span class="c1"># (n_samples, n_classes) 逐样本乘权重</span>
 </pre></div>
 <p>之后 <code>_count</code> 里 <code>feature_count_ += Y.T @ X</code>、<code>class_count_ += Y.sum(axis=0)</code> 自动得到<strong>加权计数</strong>，子类一行权重判断都不用写。</p>
-<p>这解释了两处「看着奇怪」的写法：</p>
+<p>因此：</p>
 <ul>
-<li>为什么先把 <code>Y</code> 从 int64 转 float64；</li>
-<li><code>CategoricalNB._count</code> 里为何要判断 <code>Y.dtype.type == np.int64</code>（只有无权重时才走 <code>np.bincount</code> 不带 weights 的路径）。</li>
+<li>先把 <code>Y</code> 从 int64 转 float64；</li>
+<li><code>CategoricalNB._count</code> 里判断 <code>Y.dtype.type == np.int64</code>（只有无权重时才走 <code>np.bincount</code> 不带 weights 的路径）。</li>
 </ul>
 </div>
 </div>
@@ -8433,14 +8432,8 @@ max|Δvar_|   = 1.6842549577233967e-10
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="7.-epsilon_-%E7%9A%84%E3%80%8C%E5%85%88%E5%87%8F%E5%90%8E%E5%8A%A0%E3%80%8D">7. <code>epsilon_</code> 的「先减后加」<a class="anchor-link" href="#7.-epsilon_-%E7%9A%84%E3%80%8C%E5%85%88%E5%87%8F%E5%90%8E%E5%8A%A0%E3%80%8D">¶</a></h2><p><code>GaussianNB</code> 的 <code>var_</code> 里存的<strong>不是原始方差</strong>，而是<strong>已经加过平滑量</strong>的方差：</p>
-<pre><code>epsilon_ = var_smoothing * var(X, axis=0).max()
-...
-非首次 partial_fit:  self.var_[:, :] -= self.epsilon_   # 先扣掉
-    ... 用干净的方差做第 6 节的在线合并 ...
-                     self.var_[:, :] += self.epsilon_   # 再加回
-</code></pre>
-<p>若把「已加 epsilon」的方差直接喂进第 6 节的合并公式，epsilon 会被 <code>n_past·var</code> 项放大，并随每次 <code>partial_fit</code> 越滚越大。</p>
+<h2 id="7.-epsilon_-%E7%9A%84%E3%80%8C%E5%85%88%E5%87%8F%E5%90%8E%E5%8A%A0%E3%80%8D">7. <code>epsilon_</code> 的「先减后加」<a class="anchor-link" href="#7.-epsilon_-%E7%9A%84%E3%80%8C%E5%85%88%E5%87%8F%E5%90%8E%E5%8A%A0%E3%80%8D">¶</a></h2><p><code>GaussianNB</code> 的 <code>var_</code> 里存的<strong>不是原始方差</strong>，而是<strong>已经加过平滑量</strong>的。
+若把「已加 epsilon」的方差放入第 6 节的合并公式，epsilon 会被 <code>n_past·var</code> 项放大，并随每次 <code>partial_fit</code> 越滚越大。</p>
 <blockquote>
 <p>注意：<code>epsilon_</code> 每次 <code>partial_fit</code> 都按<strong>当前批次</strong>重算（<code>var_smoothing * var(X_batch).max()</code>），所以严格说是「扣掉本批次的平滑量」。对同分布的批量数据前后 epsilon 近似相等，先减后加就能让合并公式拿到「干净」的方差。</p>
 </blockquote>
@@ -8676,7 +8669,7 @@ max|Δvar_|   = 1.6842549577233967e-10
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="9.-ComplementNB-%E7%94%A8%E4%B8%80%E4%B8%AA%E8%B4%9F%E5%8F%B7%E6%8A%8A-argmin-%E6%8A%98%E8%BF%9B-argmax">9. ComplementNB 用一个负号把 argmin 折进 argmax<a class="anchor-link" href="#9.-ComplementNB-%E7%94%A8%E4%B8%80%E4%B8%AA%E8%B4%9F%E5%8F%B7%E6%8A%8A-argmin-%E6%8A%98%E8%BF%9B-argmax">¶</a></h2><p>Complement NB（Rennie et al. 2003）为类别不平衡设计，算法上是<strong>最小化「补集」的权重</strong>。</p>
+<h2 id="9.-ComplementNB-%E7%94%A8%E4%B8%80%E4%B8%AA%E8%B4%9F%E5%8F%B7%E6%8A%8A-argmin-%E5%90%88%E5%85%A5-argmax">9. ComplementNB 用一个负号把 argmin 合入 argmax<a class="anchor-link" href="#9.-ComplementNB-%E7%94%A8%E4%B8%80%E4%B8%AA%E8%B4%9F%E5%8F%B7%E6%8A%8A-argmin-%E5%90%88%E5%85%A5-argmax">¶</a></h2><p>Complement NB（Rennie et al. 2003）为类别不平衡设计，算法上是<strong>最小化「补集」的权重</strong>。</p>
 <p>问题：基类 <code>predict</code> 写死用 <strong>argmax</strong>。sklearn 的解法是<strong>把权重取负</strong>：</p>
 <div class="highlight"><pre><span></span><span class="c1"># _BaseNB.predict uses argmax, but ComplementNB operates with argmin.</span>
 <span class="n">feature_log_prob_</span> <span class="o">=</span> <span class="o">-</span><span class="n">logged</span>     <span class="c1"># 于是 argmax(-s) ≡ argmin(s)</span>
@@ -8789,7 +8782,7 @@ norm=True  预测 [:12]: [0 0 0 0 1 0 0 1 0 0 0 1]
 <li>计数用 <code>np.bincount(X_feature[mask], weights=weights)</code>（按类掩码 + 加权直方图）；</li>
 <li><code>_joint_log_likelihood</code> 用花式索引 <code>feature_log_prob_[i][:, indices].T</code>。</li>
 </ul>
-<p>注：<code>_check_alpha</code> 在 alpha 上叠了「逐特征配置 + 1e-10 下限 + <code>force_alpha</code> 弃用过渡」三层逻辑，而且 <strong>docstring 写 <code>default=False</code>，签名默认值却已是 <code>"warn"</code></strong>。</p>
+<p>注：<code>_check_alpha</code> 在 alpha 上叠了「逐特征配置 + 1e-10 下限 + <code>force_alpha</code> 弃用过渡」三层逻辑，<code>default=False</code>。</p>
 </div>
 </div>
 </div>
@@ -8932,7 +8925,13 @@ norm=True  预测 [:12]: [0 0 0 0 1 0 0 1 0 0 0 1]
 <pre>type(feature_log_prob_): list
 每特征表格的形状      : [(2, 3), (2, 2)]
 category_count_ 形状  : [(2, 3), (2, 2)]
-
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>
 第二次 partial_fit 前: [(2, 2)]
 第二次 partial_fit 后: [(2, 5)]  &lt;- np.pad 补零列
 </pre>
@@ -9006,12 +9005,12 @@ force_alpha=True 保留 alpha: 0
 <li>每次合并前先扣掉方差平滑量、合并后再加回，避免 <code>epsilon</code> 被反复放大；</li>
 <li>类别数事先未知时，用 list-of-arrays + <code>np.pad</code> 让每个特征的类别表动态生长。</li>
 </ul>
-<p><strong>主线三：数学上的等价变换，直接兑现成工程收益。</strong></p>
+<p><strong>主线三：数学上的等价变换。</strong></p>
 <table>
 <thead>
 <tr>
 <th>等价变换</th>
-<th>换来的工程收益</th>
+<th>收益</th>
 </tr>
 </thead>
 <tbody>
@@ -9033,8 +9032,7 @@ force_alpha=True 保留 alpha: 0
 </tr>
 </tbody>
 </table>
-<p><strong>还有一条隐藏的工程习惯</strong>：把「选哪个分支」交给超参，把「数值安全」交给框架。<code>_check_alpha</code> 就是典型——逐特征 alpha + <code>1e-10</code> 下限 + <code>force_alpha</code> 弃用过渡，甚至连 docstring 写的默认值和签名都对不上。</p>
-<p>一句话总结：<strong>朴素贝叶斯在课本里是一行公式，在 sklearn 里是一套「log 域 + 可增量 + 稀疏友好」的工程骨架。读它的价值不在公式本身，而在这些为了数值稳定、内存与代码复用所做的取舍。</strong></p>
+<p><strong>隐藏的工程习惯</strong>：「分支选择」由超参选择，「数值安全」由框架负责。<code>_check_alpha</code> 就是典型——逐特征 alpha + <code>1e-10</code> 下限 + <code>force_alpha</code> 弃用过渡。</p>
 </div>
 </div>
 </div>
