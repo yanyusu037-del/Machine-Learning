@@ -7532,10 +7532,12 @@ a.anchor-link {
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h1 id="%E7%AC%AC%E5%9B%9B%E6%AC%A1%E4%BD%9C%E4%B8%9A%EF%BC%9Asklearn-%E7%BA%BF%E6%80%A7%E5%9B%9E%E5%BD%92%E6%BA%90%E7%A0%81%E8%A7%A3%E6%9E%90%EF%BC%88%E4%B8%BB%E7%BA%BF%EF%BC%9AOLS-+-SGD%EF%BC%89">第四次作业：sklearn 线性回归源码解析（主线：OLS + SGD）<a class="anchor-link" href="#%E7%AC%AC%E5%9B%9B%E6%AC%A1%E4%BD%9C%E4%B8%9A%EF%BC%9Asklearn-%E7%BA%BF%E6%80%A7%E5%9B%9E%E5%BD%92%E6%BA%90%E7%A0%81%E8%A7%A3%E6%9E%90%EF%BC%88%E4%B8%BB%E7%BA%BF%EF%BC%9AOLS-+-SGD%EF%BC%89">¶</a></h1><blockquote>
-<p>主题：阅读 scikit-learn 的实现，看课堂上没讲透的「工程决策」。
-覆盖范围仅<strong>主线</strong>：OLS（<code>LinearRegression</code>）与 SGD 梯度下降（<code>SGDRegressor</code>）；Ridge / Lasso / GLM / Huber 不在本篇。</p>
+<p>主题：阅读 scikit-learn 的实现。</p>
 </blockquote>
-<p>环境：<code>scikit-learn 1.3.2</code> / Python 3.8。文中行号均以 <strong>1.3.2</strong> 版本的库为准；code cell 一律用 <code>inspect.getsource</code> <strong>现场取源码</strong>，不写死行号。</p>
+<blockquote>
+<p><strong>主线</strong>：OLS（<code>LinearRegression</code>）与 SGD 梯度下降（<code>SGDRegressor</code>）；Ridge / Lasso / GLM / Huber 不在本篇。</p>
+</blockquote>
+<p>环境：<code>scikit-learn 1.3.2</code> / Python 3.8。文中行号均以 <strong>1.3.2</strong> 版本的库为准。</p>
 </div>
 </div>
 </div>
@@ -7546,12 +7548,11 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="1.-%E7%BA%BF%E6%80%A7%E5%9B%9E%E5%BD%92%E7%9A%84%E4%B8%A4%E5%BC%A0%E3%80%8C%E9%9D%A2%E5%AD%94%E3%80%8D%EF%BC%9A%E8%AF%BE%E4%B8%8A-vs-sklearn">1. 线性回归的两张「面孔」：课上 vs sklearn<a class="anchor-link" href="#1.-%E7%BA%BF%E6%80%A7%E5%9B%9E%E5%BD%92%E7%9A%84%E4%B8%A4%E5%BC%A0%E3%80%8C%E9%9D%A2%E5%AD%94%E3%80%8D%EF%BC%9A%E8%AF%BE%E4%B8%8A-vs-sklearn">¶</a></h2><p>课堂上的线性回归面貌很简洁：给定 <code>X</code>、<code>y</code>，最小二乘的正规方程是</p>
+<h2 id="1.-%E7%BA%BF%E6%80%A7%E5%9B%9E%E5%BD%92">1. 线性回归<a class="anchor-link" href="#1.-%E7%BA%BF%E6%80%A7%E5%9B%9E%E5%BD%92">¶</a></h2><p>线性回归很简洁：给定 <code>X</code>、<code>y</code>，最小二乘的正规方程是</p>
 <p>$$w = (X^\top X)^{-1} X^\top y$$</p>
-<p><strong>当 <code>XᵀX</code> 可逆时，教科书用这个正规方程 <code>w=(XᵀX)⁻¹Xᵀy</code>；sklearn 对其弃用</strong>（见第 3 节：实际走 scipy 的 <code>lstsq</code> / <code>nnls</code> / <code>lsqr</code>）。</p>
-<p>（带截距时用增广矩阵或先去均值），正则化版本再加一项 <code>α‖w‖²</code>（岭）或 <code>α‖w‖₁</code>（Lasso）。这些公式本体本作业<strong>不展开</strong>。</p>
-<p>两张面孔的差别在于：课上讲的是<strong>数学上正确的解</strong>；sklearn 实现里串起的是一连串<strong>工程决策</strong>——同一份数学，为了适应稀疏数据、多目标、正约束、大样本与在线学习，被拆成了多条路径、多种表示。</p>
-<p>本作业只挑 sklearn 实现里「不一样」的地方看，按两条主线组织：</p>
+<p><strong>当 <code>XᵀX</code> 可逆时，用这个正规方程 <code>w=(XᵀX)⁻¹Xᵀy</code>；然而sklearn 对其弃用</strong>（见第 3 节：实际使用 scipy 的 <code>lstsq</code> / <code>nnls</code> / <code>lsqr</code>）。</p>
+<p>（带截距时用增广矩阵或先去均值），正则化版本再加一项 <code>α‖w‖²</code>（岭）或 <code>α‖w‖₁</code>（Lasso），这里不具体展开。</p>
+<p>本作业按两条主线组织：</p>
 <table>
 <thead>
 <tr>
@@ -7584,13 +7585,11 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="2.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9Alinear_model-%E7%9A%84%E5%8F%AF%E5%88%86%E6%9E%90%E8%BE%B9%E7%95%8C">2. 定位源码：<code>linear_model</code> 的可分析边界<a class="anchor-link" href="#2.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9Alinear_model-%E7%9A%84%E5%8F%AF%E5%88%86%E6%9E%90%E8%BE%B9%E7%95%8C">¶</a></h2><p>与作业 2（KNN 大量 <code>.so</code>）、作业 3（朴素贝叶斯几乎纯 Python）不同，本次是<strong>混合结构</strong>：</p>
-<ul>
+<h2 id="2.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9Alinear_model-%E7%9A%84%E5%8F%AF%E5%88%86%E6%9E%90%E8%BE%B9%E7%95%8C">2. 定位源码：<code>linear_model</code> 的可分析边界<a class="anchor-link" href="#2.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9Alinear_model-%E7%9A%84%E5%8F%AF%E5%88%86%E6%9E%90%E8%BE%B9%E7%95%8C">¶</a></h2><ul>
 <li><strong>纯 Python，可 <code>inspect.getsource</code> 逐行读</strong>：<code>_base.py</code>（OLS）、<code>_stochastic_gradient.py</code>（SGD 的<strong>外层流程</strong>）、<code>_glm/</code>、<code>_linear_loss.py</code> 等；</li>
 <li><strong>本地包内只有 <code>.so</code>，看不到内循环</strong>：<code>_cd_fast</code>（坐标下降）、<code>_sag_fast</code>（SAG/SAGA）、<code>_sgd_fast</code>（SGD 内循环 <code>_plain_sgd32/64</code> 与各 <code>LossFunction</code> / <code>Penalty</code> / <code>LearningRate</code> 类）。</li>
 </ul>
-<p>对编译模块只能做「接口 / 分派点 / docstring / 调用点」的<strong>黑盒分析</strong>；如需深入实现，只能另读对应版本的上游 Cython <code>.pyx</code>——那不属于本项目可 dump 的范围。</p>
-<p>本作业要讲清的就是这条边界：<strong>Python 侧是「配置台与分派台」，真正的数值循环在 C 层。</strong></p>
+<p>如需深入实现，只能另读对应版本的上游 Cython <code>.pyx</code>。</p>
 </div>
 </div>
 </div>
@@ -7683,11 +7682,11 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="3.-OLS-%E4%B8%8D%E7%94%A8%E6%AD%A3%E8%A7%84%E6%96%B9%E7%A8%8B%EF%BC%9A%E4%B8%89%E7%B1%BB%E5%90%8E%E7%AB%AF-%C3%97-%E5%A4%9A%E7%9B%AE%E6%A0%87%E7%AD%96%E7%95%A5%EF%BC%88R1/R5/R6/R7%EF%BC%89">3. OLS 不用正规方程：三类后端 × 多目标策略（R1/R5/R6/R7）<a class="anchor-link" href="#3.-OLS-%E4%B8%8D%E7%94%A8%E6%AD%A3%E8%A7%84%E6%96%B9%E7%A8%8B%EF%BC%9A%E4%B8%89%E7%B1%BB%E5%90%8E%E7%AB%AF-%C3%97-%E5%A4%9A%E7%9B%AE%E6%A0%87%E7%AD%96%E7%95%A5%EF%BC%88R1/R5/R6/R7%EF%BC%89">¶</a></h2><p><code>LinearRegression</code> 的 docstring 自己就点破了（<code>_base.py</code> L608–610）：</p>
+<h2 id="3.-OLS-%E4%B8%8D%E7%94%A8%E6%AD%A3%E8%A7%84%E6%96%B9%E7%A8%8B%EF%BC%9A%E4%B8%89%E7%B1%BB%E5%90%8E%E7%AB%AF-%C3%97-%E5%A4%9A%E7%9B%AE%E6%A0%87%E7%AD%96%E7%95%A5">3. OLS 不用正规方程：三类后端 × 多目标策略<a class="anchor-link" href="#3.-OLS-%E4%B8%8D%E7%94%A8%E6%AD%A3%E8%A7%84%E6%96%B9%E7%A8%8B%EF%BC%9A%E4%B8%89%E7%B1%BB%E5%90%8E%E7%AB%AF-%C3%97-%E5%A4%9A%E7%9B%AE%E6%A0%87%E7%AD%96%E7%95%A5">¶</a></h2><p><code>LinearRegression</code> 的 docstring 如下（<code>_base.py</code> L608–610）：</p>
 <blockquote>
 <p><em>"From the implementation point of view, this is just plain Ordinary Least Squares (<strong>scipy.linalg.lstsq</strong>) or Non Negative Least Squares (<strong>scipy.optimize.nnls</strong>) wrapped as a predictor object."</em></p>
 </blockquote>
-<p>也就说：教科书里的正规方程 <code>w=(XᵀX)⁻¹Xᵀy</code> <strong>从不被使用</strong>。<code>fit</code>（L709–752）实际是<strong>三类后端分派</strong>：</p>
+<p>也就说：正规方程 <code>w=(XᵀX)⁻¹Xᵀy</code> <strong>从不被使用</strong>。<code>fit</code>（L709–752）实际是<strong>三类后端分派</strong>：</p>
 <table>
 <thead>
 <tr>
@@ -7718,10 +7717,6 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
 </tr>
 </tbody>
 </table>
-<p><strong>关于 NNLS（后端①）的准确表述</strong>：非负约束使部分系数落在零边界，其余系数随之重新优化（并非把 OLS 的负系数直接截零）。本例（下面 code cell）实证：第 1 项系数 <code>0.993 → 1.047</code>（反而变大），第 2 项被压到 0 —— 若只是简单截零，第 1 项不会变。</p>
-<p><strong>多目标不是第 4 个后端，而是一种「策略」</strong>：稠密 <code>lstsq</code> <strong>原生支持 2D <code>y</code></strong>（返回 <code>(n_features, n_targets)</code> 再转置）；只有 <code>nnls</code> 与稀疏 <code>lsqr</code> 因为<strong>只吃 1D <code>y</code></strong>，才<strong>逐列</strong> <code>joblib.Parallel</code> 拼回结果。</p>
-<p><strong><code>rank_</code> / <code>singular_</code> 只在「稠密 且 <code>positive=False</code> 且走 <code>lstsq</code> 分支」时赋值</strong>——它们来自 <code>linalg.lstsq</code> 的返回值；稀疏 LSQR 与 NNLS 路径拿不到，且 <code>positive=True</code> 甚至在 <code>_validate_data</code> 阶段就禁掉了稀疏（L676）。属性文档只说「仅当 <code>X</code> 稠密时可用」，上面这句是它的<strong>精确化</strong>。</p>
-<p><strong><code>n_jobs</code> 的触发条件：多目标 且（稀疏 或 <code>positive=True</code>）</strong>——它是 docstring（L552–558）里一个「条件性参数」，实现中<strong>唯一</strong>的使用处就是上面那两处 <code>Parallel</code>。条件不满足时不走 joblib，但这<strong>不代表底层只有一个线程</strong>：BLAS / LAPACK 仍可能多线程。</p>
 </div>
 </div>
 </div>
@@ -7759,7 +7754,7 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
     <span class="k">return</span> <span class="n">out</span>
 
 
-<span class="c1"># 关键位置的注释（不写行号，只标「位置」），与 markdown 中的结论一一对应</span>
+<span class="c1"># 关键位置的注释</span>
 <span class="n">MARKS</span> <span class="o">=</span> <span class="p">{</span>
     <span class="s2">"if self.positive:"</span><span class="p">:</span>
         <span class="s2">"  # &lt;== 后端①：positive=True -&gt; scipy.optimize.nnls"</span><span class="p">,</span>
@@ -7783,7 +7778,7 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
         <span class="s2">"  # &lt;== 此处为带 sample_weight 分支（修正项乘 sqrt(w)）"</span><span class="p">,</span>
 <span class="p">}</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="s2">"# LinearRegression.fit()（已删 docstring）—— 三类后端分派 + 多目标策略"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"# LinearRegression.fit()（不包括 docstring）—— 三类后端分派 + 多目标策略"</span><span class="p">)</span>
 <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">strip_docstring</span><span class="p">(</span><span class="n">inspect</span><span class="o">.</span><span class="n">getsource</span><span class="p">(</span><span class="n">LinearRegression</span><span class="o">.</span><span class="n">fit</span><span class="p">)):</span>
     <span class="nb">print</span><span class="p">(</span><span class="n">line</span> <span class="o">+</span> <span class="n">MARKS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="s2">""</span><span class="p">))</span>
 </pre></div>
@@ -7798,7 +7793,7 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre># LinearRegression.fit()（已删 docstring）—— 三类后端分派 + 多目标策略
+<pre># LinearRegression.fit()（不包括 docstring）—— 三类后端分派 + 多目标策略
     @_fit_context(prefer_skip_nested_validation=True)
     def fit(self, X, y, sample_weight=None):
         n_jobs_ = self.n_jobs
@@ -7887,6 +7882,20 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
         return self
 </pre>
 </div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=acf8db94">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p><strong>关于 NNLS（后端①）的准确表述</strong>：非负约束使部分系数落在零边界，其余系数随之重新优化（并非把 OLS 的负系数直接截零）。本例（下面 code cell）实证：第 1 项系数 <code>0.993 → 1.047</code>（反而变大），第 2 项被压到 0 —— 若只是简单截零，第 1 项不会变。</p>
+<p>稠密 <code>lstsq</code> <strong>原生支持 2D <code>y</code></strong>（返回 <code>(n_features, n_targets)</code> 再转置）；只有 <code>nnls</code> 与稀疏 <code>lsqr</code> 因为<strong>只对应 1D <code>y</code></strong>，<strong>逐列</strong> <code>joblib.Parallel</code> 拼回结果。</p>
+<p><strong><code>rank_</code> / <code>singular_</code> 只在「稠密 且 <code>positive=False</code> 且走 <code>lstsq</code> 分支」时赋值</strong>——它们来自 <code>linalg.lstsq</code> 的返回值；稀疏 LSQR 与 NNLS 路径拿不到，且 <code>positive=True</code> 甚至在 <code>_validate_data</code> 阶段就禁掉了稀疏（L676）。属性文档中指出，「仅当 <code>X</code> 稠密时可用」。</p>
+<p><strong><code>n_jobs</code> 的触发条件：多目标 且（稀疏 或 <code>positive=True</code>）</strong>——它是 docstring（L552–558）里一个「条件性参数」，实现中<strong>唯一</strong>的使用处就是上面那两处 <code>Parallel</code>。条件不满足时不走 joblib，但这<strong>不代表底层只有一个线程</strong>：BLAS / LAPACK 仍可能多线程。</p>
 </div>
 </div>
 </div>
@@ -7998,21 +8007,13 @@ NNLS模型 hasattr(rank_)     : False
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="4.-%E6%88%AA%E8%B7%9D%EF%BC%9A%E5%8E%BB%E5%9D%87%E5%80%BC%E9%87%8D%E6%9E%84-+-%E7%A8%80%E7%96%8F%E9%9A%90%E5%BC%8F%E4%B8%AD%E5%BF%83%E5%8C%96%EF%BC%88R2/R3%EF%BC%89">4. 截距：去均值重构 + 稀疏隐式中心化（R2/R3）<a class="anchor-link" href="#4.-%E6%88%AA%E8%B7%9D%EF%BC%9A%E5%8E%BB%E5%9D%87%E5%80%BC%E9%87%8D%E6%9E%84-+-%E7%A8%80%E7%96%8F%E9%9A%90%E5%BC%8F%E4%B8%AD%E5%BF%83%E5%8C%96%EF%BC%88R2/R3%EF%BC%89">¶</a></h2><p><code>fit_intercept=True</code> 时，截距<strong>不是</strong>「给 X 加一列 1」，而是（<code>_preprocess_data</code> L248–286）：</p>
+<h2 id="4.-%E6%88%AA%E8%B7%9D%EF%BC%9A%E5%8E%BB%E5%9D%87%E5%80%BC%E9%87%8D%E6%9E%84-+-%E7%A8%80%E7%96%8F%E9%9A%90%E5%BC%8F%E4%B8%AD%E5%BF%83%E5%8C%96">4. 截距：去均值重构 + 稀疏隐式中心化<a class="anchor-link" href="#4.-%E6%88%AA%E8%B7%9D%EF%BC%9A%E5%8E%BB%E5%9D%87%E5%80%BC%E9%87%8D%E6%9E%84-+-%E7%A8%80%E7%96%8F%E9%9A%90%E5%BC%8F%E4%B8%AD%E5%BF%83%E5%8C%96">¶</a></h2><p><code>fit_intercept=True</code> 时，截距<strong>不是</strong>「给 X 加一列 1」，而是（<code>_preprocess_data</code> L248–286）：</p>
 <ol>
 <li><code>X</code>、<code>y</code> 各自减去<strong>加权均值</strong>（有 <code>sample_weight</code> 时按权重求平均）；</li>
 <li>在<strong>去均值后的数据</strong>上拟合一个<strong>无截距</strong>模型；</li>
 <li>再由 <code>intercept_ = y_offset − X_offset · coef_</code> <strong>反推</strong>截距（<code>_set_intercept</code> L394）。</li>
 </ol>
 <p>好处是<strong>不必显式扩列</strong>，SVD / LSQR 直接作用在原始列空间上。</p>
-<p>一处容易误读的地方：本路径（<code>LinearRegression</code>）<strong>未启用 <code>normalize</code></strong>，所以 <code>_preprocess_data</code> 里 <code>X_scale = np.ones(...)</code> —— <strong><code>X_scale</code> 恒为全 1</strong>。因此 <code>_set_intercept</code> 里那句 <code>np.divide(coef_, X_scale)</code> 实际是<strong>恒等操作</strong>；它是为 <code>normalize=True</code> 的老路径与其它模型保留的统一写法。<code>fit_intercept=False</code> 时更直接：<code>intercept_ = 0.0</code>。</p>
-<p>稀疏 <code>X</code> 还多一层：<strong>真去中心化会破坏稀疏性</strong>（减均值后几乎处处非零 → 变稠密）。于是 <code>fit</code>（L718–739）不物化中心化矩阵，而是用 <code>LinearOperator</code> 定义</p>
-<ul>
-<li><code>matvec(b)  = X·b  − b·(X_offset / X_scale)</code></li>
-<li><code>rmatvec(b) = Xᵀ·b − (X_offset / X_scale)·b.sum()</code></li>
-</ul>
-<p>（上面两条列出的是<strong>无 <code>sample_weight</code></strong> 的分支（<code>_base.py</code> L729–735）。带权分支（L721–727）的中心化修正项还会乘 <code>sample_weight_sqrt = √w</code>：<code>matvec(b) = X·b − √w·(b·(X_offset / X_scale))</code>、<code>rmatvec(b) = Xᵀ·b − (X_offset / X_scale)·(b·√w)</code>。）</p>
-<p>把「已中心化的 X」表示成一个<strong>只提供矩阵向量乘的算子</strong>喂给 <code>lsqr</code> —— <strong>数学等价、内存不爆</strong>。</p>
 </div>
 </div>
 </div>
@@ -8033,7 +8034,7 @@ NNLS模型 hasattr(rank_)     : False
 <span class="n">s</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span> <span class="k">if</span> <span class="s2">"if fit_intercept:"</span> <span class="ow">in</span> <span class="n">l</span><span class="p">)</span>
 <span class="n">e</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span> <span class="k">if</span> <span class="s2">"return X, y, X_offset, y_offset, X_scale"</span> <span class="ow">in</span> <span class="n">l</span><span class="p">)</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="s2">"# _preprocess_data() —— 去均值与 X_scale（本路径下未启用 normalize）"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"# _preprocess_data() —— 去均值与 X_scale（这里未启用 normalize）"</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]))</span>
 
 <span class="nb">print</span><span class="p">()</span>
@@ -8051,7 +8052,7 @@ NNLS模型 hasattr(rank_)     : False
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre># _preprocess_data() —— 去均值与 X_scale（本路径下未启用 normalize）
+<pre># _preprocess_data() —— 去均值与 X_scale（这里未启用 normalize）
     if fit_intercept:
         if sp.issparse(X):
             X_offset, X_var = mean_variance_axis(X, axis=0, weights=sample_weight)
@@ -8114,6 +8115,24 @@ NNLS模型 hasattr(rank_)     : False
 
 </pre>
 </div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=4da9c131">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>一处容易误读的地方：本路径（<code>LinearRegression</code>）<strong>未启用 <code>normalize</code></strong>，所以 <code>_preprocess_data</code> 里 <code>X_scale = np.ones(...)</code> —— <strong><code>X_scale</code> 恒为全 1</strong>。因此 <code>_set_intercept</code> 里的 <code>np.divide(coef_, X_scale)</code> 实际是<strong>恒等操作</strong>；它是为 <code>normalize=True</code> 的老路径与其它模型保留的统一写法。<code>fit_intercept=False</code> 时更直接：<code>intercept_ = 0.0</code>。</p>
+<p>稀疏 <code>X</code> 还多一层：<strong>真去中心化会破坏稀疏性</strong>（减均值后几乎处处非零 → 变稠密）。于是 <code>fit</code>（L718–739）不物化中心化矩阵，而是用 <code>LinearOperator</code> 定义</p>
+<ul>
+<li><code>matvec(b)  = X·b  − b·(X_offset / X_scale)</code></li>
+<li><code>rmatvec(b) = Xᵀ·b − (X_offset / X_scale)·b.sum()</code></li>
+</ul>
+<p>（上面两条列出的是<strong>无 <code>sample_weight</code></strong> 的分支（<code>_base.py</code> L729–735）。带权分支（L721–727）的中心化修正项还会乘 <code>sample_weight_sqrt = √w</code>：<code>matvec(b) = X·b − √w·(b·(X_offset / X_scale))</code>、<code>rmatvec(b) = Xᵀ·b − (X_offset / X_scale)·(b·√w)</code>。）</p>
+<p>把「已中心化的 X」表示成一个<strong>只提供矩阵向量乘的算子</strong>喂给 <code>lsqr</code> （<strong>数学等价</strong>）。</p>
 </div>
 </div>
 </div>
@@ -8200,11 +8219,9 @@ X_scale 是否全为 1 : True
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="5.-%E6%A0%B7%E6%9C%AC%E6%9D%83%E9%87%8D%EF%BC%9A%E2%88%9Aw-%E9%87%8D%E7%BC%A9%E6%94%BE%E6%8A%8A-WLS-%E6%8A%98%E6%88%90-OLS%EF%BC%88R4%EF%BC%89">5. 样本权重：√w 重缩放把 WLS 折成 OLS（R4）<a class="anchor-link" href="#5.-%E6%A0%B7%E6%9C%AC%E6%9D%83%E9%87%8D%EF%BC%9A%E2%88%9Aw-%E9%87%8D%E7%BC%A9%E6%94%BE%E6%8A%8A-WLS-%E6%8A%98%E6%88%90-OLS%EF%BC%88R4%EF%BC%89">¶</a></h2><p>带权最小二乘（WLS）要最小化 <code>(y−Xw)ᵀ S (y−Xw)</code>，其中 <code>S = diag(sample_weight)</code>。sklearn 不为此单开一条求解路径，而是利用一个恒等式（<code>_rescale_data</code> docstring L308–312 直接写出）：</p>
+<h2 id="5.-%E6%A0%B7%E6%9C%AC%E6%9D%83%E9%87%8D%EF%BC%9A$%5Csqrt%7Bw%7D$-%E9%87%8D%E7%BC%A9%E6%94%BE%E6%8A%8A-WLS-%E6%8A%98%E6%88%90-OLS">5. 样本权重：$\sqrt{w}$ 重缩放把 WLS 折成 OLS<a class="anchor-link" href="#5.-%E6%A0%B7%E6%9C%AC%E6%9D%83%E9%87%8D%EF%BC%9A$%5Csqrt%7Bw%7D$-%E9%87%8D%E7%BC%A9%E6%94%BE%E6%8A%8A-WLS-%E6%8A%98%E6%88%90-OLS">¶</a></h2><p>带权最小二乘（WLS）要最小化 <code>(y−Xw)ᵀ S (y−Xw)</code>，其中 <code>S = diag(sample_weight)</code>。sklearn 不为此单开一条求解路径，而是利用一个恒等式（<code>_rescale_data</code> docstring L308–312 直接写出）：</p>
 <p>$$(y-Xw)^\top S\,(y-Xw) \;=\; \lVert \sqrt{S}\,y \;-\; \sqrt{S}\,X\,w \rVert_2^2$$</p>
-<p>于是<strong>加权最小二乘 ≡ 对 <code>√S·X, √S·y</code> 做普通最小二乘</strong> —— 权重被吸收进数据本身。教科书只给 WLS 的正规方程，不会讲这层变换。</p>
-<p><strong>注意顺序与截距</strong>：有截距时，必须先按样本权重对 <code>X</code>、<code>y</code> 中心化，再做 <code>√w</code> 缩放，然后求解<strong>无截距</strong>问题，最后用 <code>intercept_ = ȳ_w − X̄_w·coef_</code> 重构截距（即 <code>_preprocess_data → _rescale_data → 无截距求解 → _set_intercept</code>）。不能直接对原始 <code>X</code>、<code>y</code> 乘 <code>√w</code> 后用默认带截距模型。</p>
-<p>实现上还有个 <code>inplace</code> 优化（L338–341）：仅当 <code>_preprocess_data</code> 已经复制过数据时才原地缩放，避免多一次拷贝。</p>
+<p>于是<strong>加权最小二乘 ≡ 对 $\sqrt{S}·X, \sqrt{S}·y$ 做普通最小二乘</strong>。</p>
 </div>
 </div>
 </div>
@@ -8295,6 +8312,18 @@ def _rescale_data(X, y, sample_weight, inplace=False):
 </div>
 </div>
 </div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=0b6d997e">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>有截距时，必须先按样本权重对 <code>X</code>、<code>y</code> 中心化，再做 <code>√w</code> 缩放，然后求解<strong>无截距</strong>问题，最后用 <code>intercept_ = ȳ_w − X̄_w·coef_</code> 重构截距（即 <code>_preprocess_data → _rescale_data → 无截距求解 → _set_intercept</code>）。不能直接对原始 <code>X</code>、<code>y</code> 乘 <code>√w</code> 后用默认带截距模型。</p>
+<p>实现上还有个 <code>inplace</code> 优化（L338–341）：仅当 <code>_preprocess_data</code> 已经复制过数据时才原地缩放，避免多一次拷贝。</p>
+</div>
+</div>
+</div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=e708eeab">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
@@ -8363,7 +8392,13 @@ coef_ 一致(allclose)     : True
 intercept_ 一致          : True
 
 sqrt(sw) 前 5 个         : [1.4142 1.     1.     1.7321 1.    ]
-手工流程 coef_  : [ 1.00326196 -2.99444072  2.00864013]
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>手工流程 coef_  : [ 1.00326196 -2.99444072  2.00864013]
 模型 coef_      : [ 1.00326196 -2.99444072  2.00864013]
 coef_ 一致      : True
 手工 intercept_ : 0.9964822472730329
@@ -8381,7 +8416,7 @@ intercept_ 一致 : True
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="6.-SGD-%E7%9A%84%E9%85%8D%E7%BD%AE%E5%8F%B0%EF%BC%9A%E5%AD%97%E7%AC%A6%E4%B8%B2-%E2%86%92-%E6%9E%9A%E4%B8%BE-%E2%86%92-C-%E5%86%85%E5%BE%AA%E7%8E%AF%EF%BC%88R8/R9/R14%EF%BC%89">6. SGD 的配置台：字符串 → 枚举 → C 内循环（R8/R9/R14）<a class="anchor-link" href="#6.-SGD-%E7%9A%84%E9%85%8D%E7%BD%AE%E5%8F%B0%EF%BC%9A%E5%AD%97%E7%AC%A6%E4%B8%B2-%E2%86%92-%E6%9E%9A%E4%B8%BE-%E2%86%92-C-%E5%86%85%E5%BE%AA%E7%8E%AF%EF%BC%88R8/R9/R14%EF%BC%89">¶</a></h2><p><code>SGDRegressor</code> 的 Python 部分几乎不做数值计算。真正的梯度更新在编译模块 <code>_plain_sgd32/64</code>（来自 <code>_sgd_fast</code>，本地包内只有 <code>.so</code>）。Python 侧只做三件事：</p>
+<h2 id="6.-SGD-%E7%9A%84%E9%85%8D%E7%BD%AE%E5%8F%B0%EF%BC%9A%E5%AD%97%E7%AC%A6%E4%B8%B2-%E2%86%92-%E6%9E%9A%E4%B8%BE-%E2%86%92-C-%E5%86%85%E5%BE%AA%E7%8E%AF">6. SGD 的配置台：字符串 → 枚举 → C 内循环<a class="anchor-link" href="#6.-SGD-%E7%9A%84%E9%85%8D%E7%BD%AE%E5%8F%B0%EF%BC%9A%E5%AD%97%E7%AC%A6%E4%B8%B2-%E2%86%92-%E6%9E%9A%E4%B8%BE-%E2%86%92-C-%E5%86%85%E5%BE%AA%E7%8E%AF">¶</a></h2><p><code>SGDRegressor</code> 的 Python 部分几乎不做数值计算。真正的梯度更新在编译模块 <code>_plain_sgd32/64</code>（来自 <code>_sgd_fast</code>，本地包内只有 <code>.so</code>）。Python 侧只做三件事：</p>
 <ol>
 <li><strong><code>loss</code> 字符串 → Cython 的 <code>LossFunction</code> 对象</strong>（<code>_get_loss_function</code>）；</li>
 <li><strong><code>penalty</code> / <code>learning_rate</code> 字符串 → 整数枚举</strong>：
@@ -8616,7 +8651,7 @@ def make_dataset(X, y, sample_weight, random_state=None):
 
 loss_functions 的键 : ['epsilon_insensitive', 'huber', 'squared_epsilon_insensitive', 'squared_error']
 squared_error 对应的类 : &lt;class 'sklearn.linear_model._sgd_fast.SquaredLoss'&gt;
-实例化后的 loss 对象    : &lt;sklearn.linear_model._sgd_fast.SquaredLoss object at 0x70d51a8ddaf0&gt;
+实例化后的 loss 对象    : &lt;sklearn.linear_model._sgd_fast.SquaredLoss object at 0x78107002c970&gt;
         dataset, intercept_decay = make_dataset(
             X, y, sample_weight, random_state=random_state
         )
@@ -8643,7 +8678,7 @@ squared_error 对应的类 : &lt;class 'sklearn.linear_model._sgd_fast.SquaredLo
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="7.-SGD-%E7%9A%84%E4%BC%98%E5%8C%96%E7%8A%B6%E6%80%81%EF%BC%9At_-/-ASGD-/-%E9%AA%8C%E8%AF%81%E6%8E%A9%E7%A0%81-/-%E6%88%AA%E8%B7%9D%E8%A1%B0%E5%87%8F%EF%BC%88R10/R11/R12/R13%EF%BC%89">7. SGD 的优化状态：t_ / ASGD / 验证掩码 / 截距衰减（R10/R11/R12/R13）<a class="anchor-link" href="#7.-SGD-%E7%9A%84%E4%BC%98%E5%8C%96%E7%8A%B6%E6%80%81%EF%BC%9At_-/-ASGD-/-%E9%AA%8C%E8%AF%81%E6%8E%A9%E7%A0%81-/-%E6%88%AA%E8%B7%9D%E8%A1%B0%E5%87%8F%EF%BC%88R10/R11/R12/R13%EF%BC%89">¶</a></h2><p><code>t_</code> 是学习率调度（<code>invscaling</code> / <code>optimal</code>）使用的<strong>时间步计数器</strong>：初值为 1，普通训练下每轮增加 <code>n_samples</code>（因此它常等于累计样本数，但本质是时间步，不是样本计数）——<code>self.t_ += self.n_iter_ * X.shape[0]</code>（L1716）。</p>
+<h2 id="7.-SGD-%E7%9A%84%E4%BC%98%E5%8C%96%E7%8A%B6%E6%80%81%EF%BC%9At_-/-ASGD-/-%E9%AA%8C%E8%AF%81%E6%8E%A9%E7%A0%81-/-%E6%88%AA%E8%B7%9D%E8%A1%B0%E5%87%8F">7. SGD 的优化状态：t_ / ASGD / 验证掩码 / 截距衰减<a class="anchor-link" href="#7.-SGD-%E7%9A%84%E4%BC%98%E5%8C%96%E7%8A%B6%E6%80%81%EF%BC%9At_-/-ASGD-/-%E9%AA%8C%E8%AF%81%E6%8E%A9%E7%A0%81-/-%E6%88%AA%E8%B7%9D%E8%A1%B0%E5%87%8F">¶</a></h2><p><code>t_</code> 是学习率调度（<code>invscaling</code> / <code>optimal</code>）使用的<strong>时间步计数器</strong>：初值为 1，普通训练下每轮增加 <code>n_samples</code>（因此它常等于累计样本数，但本质是时间步，不是样本计数）——<code>self.t_ += self.n_iter_ * X.shape[0]</code>（L1716）。</p>
 <p>关键细节：<strong><code>fit</code> 每次调用都会把 <code>t_</code> 重置为 1.0</strong> —— 这行位于 <code>warm_start</code> 分支<strong>之后</strong>（L1540–1541），所以 <strong>即使 <code>warm_start=True</code> 也照样重置</strong>；只有 <code>partial_fit</code> 走 <code>_partial_fit</code>（L1506）、<strong>不重置</strong>，<code>_fit_regressor</code> 仅在 <code>t_</code> 不存在时才补 1.0（L1653–1654）。因此「跨调用累积」<strong>只对 <code>partial_fit</code> 成立</strong>。</p>
 <p>本节 code 实测（<code>n_samples = 394</code>）：连续两次 <code>partial_fit</code> 使 <code>t_</code> 由 <code>395</code> 递增到 <code>789</code>，随后调用 <code>fit</code> 回落为 <code>395</code>；<code>warm_start=True</code> 同样在 <code>fit</code> 后重置（<code>789 → 395</code>）。</p>
 <p><code>average=True</code> 是<strong>平均 SGD（ASGD）</strong>：除 <code>coef_</code> 外另存 <code>_standard_coef</code> / <code>_average_coef</code>，对迭代过程中的权重做<strong>历史平均</strong>；且只有满足 <code>average &lt;= t_ − 1</code> 时才真正使用平均值（L1722–1728）。</p>
@@ -8841,12 +8876,11 @@ SPARSE_INTERCEPT_DECAY = 0.01
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="8.-%E5%B0%8F%E7%BB%93">8. 小结<a class="anchor-link" href="#8.-%E5%B0%8F%E7%BB%93">¶</a></h2><p>把两条主线串成一句：<strong>「Python 分派台 + C 内循环」</strong>。</p>
-<ul>
+<h2 id="8.-%E5%B0%8F%E7%BB%93">8. 小结<a class="anchor-link" href="#8.-%E5%B0%8F%E7%BB%93">¶</a></h2><ul>
 <li><strong>sklearn 的 Python 侧做的是预处理（中心化 / 归一化）、样本权重缩放、求解器分派与截距重构</strong>：<code>positive</code> → NNLS、稀疏 → LSQR、稠密 → SVD（<code>lstsq</code>）；多目标不是新后端而是策略（原生 2D 或逐列 <code>Parallel</code>）；<code>rank_</code> / <code>singular_</code> 只是 <code>lstsq</code> 的「附带产物」，因此只在「稠密 + <code>positive=False</code>」路径上存在。分派依据是 <strong><code>dtype</code> / 形状 / 稀疏 / <code>positive</code> / 多目标</strong>。</li>
 <li><strong>截距、权重、中心化都不改变算法</strong>，而是通过<strong>等价变换</strong>把问题折成标准形式：去均值重构截距、<code>√w</code> 重缩放吸收权重、<code>LinearOperator</code> 隐式中心化保住稀疏性。</li>
 <li><strong>SGD 的 Python 侧是配置台</strong>（字符串 → 枚举 → C 参数），真正的迭代在 <code>_sgd_fast</code>；优化状态（<code>t_</code>、ASGD、验证掩码、<code>intercept_decay</code>）由 Python 与 C 共同维护。</li>
-<li><strong>sklearn 负责预处理与求解器组织，核心数值求解委托给 SciPy</strong>（SVD / LSQR / NNLS）—— 这是「用成熟数值库，而不是手写正规方程」的直接后果。</li>
+<li><strong>sklearn 负责预处理与求解器组织，核心数值求解委托给 SciPy</strong>（SVD / LSQR / NNLS）。</li>
 </ul>
 </div>
 </div>
