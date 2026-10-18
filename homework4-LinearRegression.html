@@ -7548,6 +7548,7 @@ a.anchor-link {
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h2 id="1.-%E7%BA%BF%E6%80%A7%E5%9B%9E%E5%BD%92%E7%9A%84%E4%B8%A4%E5%BC%A0%E3%80%8C%E9%9D%A2%E5%AD%94%E3%80%8D%EF%BC%9A%E8%AF%BE%E4%B8%8A-vs-sklearn">1. 线性回归的两张「面孔」：课上 vs sklearn<a class="anchor-link" href="#1.-%E7%BA%BF%E6%80%A7%E5%9B%9E%E5%BD%92%E7%9A%84%E4%B8%A4%E5%BC%A0%E3%80%8C%E9%9D%A2%E5%AD%94%E3%80%8D%EF%BC%9A%E8%AF%BE%E4%B8%8A-vs-sklearn">¶</a></h2><p>课堂上的线性回归面貌很简洁：给定 <code>X</code>、<code>y</code>，最小二乘的正规方程是</p>
 <p>$$w = (X^\top X)^{-1} X^\top y$$</p>
+<p><strong>当 <code>XᵀX</code> 可逆时，教科书用这个正规方程 <code>w=(XᵀX)⁻¹Xᵀy</code>；sklearn 对其弃用</strong>（见第 3 节：实际走 scipy 的 <code>lstsq</code> / <code>nnls</code> / <code>lsqr</code>）。</p>
 <p>（带截距时用增广矩阵或先去均值），正则化版本再加一项 <code>α‖w‖²</code>（岭）或 <code>α‖w‖₁</code>（Lasso）。这些公式本体本作业<strong>不展开</strong>。</p>
 <p>两张面孔的差别在于：课上讲的是<strong>数学上正确的解</strong>；sklearn 实现里串起的是一连串<strong>工程决策</strong>——同一份数学，为了适应稀疏数据、多目标、正约束、大样本与在线学习，被拆成了多条路径、多种表示。</p>
 <p>本作业只挑 sklearn 实现里「不一样」的地方看，按两条主线组织：</p>
@@ -7572,7 +7573,7 @@ a.anchor-link {
 </tr>
 </tbody>
 </table>
-<p>一句话贯穿全篇：<strong>分派条件（<code>dtype</code> / 形状 / 稀疏 / <code>positive</code> / 多目标）决定算法，数值稳定性由 scipy 后端兜底。</strong></p>
+<p>一句话贯穿全篇：<strong>分派条件（<code>dtype</code> / 形状 / 稀疏 / <code>positive</code> / 多目标）决定算法；sklearn 负责预处理与求解器组织，核心数值求解委托给 SciPy。</strong></p>
 </div>
 </div>
 </div>
@@ -7701,7 +7702,7 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
 <td>①</td>
 <td><code>positive=True</code></td>
 <td><code>scipy.optimize.nnls</code>（active-set）</td>
-<td>非负最小二乘，另一套算法</td>
+<td>非负最小二乘：约束下<strong>重新求解</strong>，不是把 OLS 的负系数截零</td>
 </tr>
 <tr>
 <td>②</td>
@@ -7713,10 +7714,11 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
 <td>③</td>
 <td>稠密且 <code>positive=False</code></td>
 <td><code>scipy.linalg.lstsq</code>（<strong>SVD</strong>）</td>
-<td>数值最稳，还顺带给出秩与奇异值</td>
+<td>通过 SVD 求解，避免显式构造正规方程，适合处理秩亏问题，还顺带给出秩与奇异值</td>
 </tr>
 </tbody>
 </table>
+<p><strong>关于 NNLS（后端①）的准确表述</strong>：非负约束使部分系数落在零边界，其余系数随之重新优化（并非把 OLS 的负系数直接截零）。本例（下面 code cell）实证：第 1 项系数 <code>0.993 → 1.047</code>（反而变大），第 2 项被压到 0 —— 若只是简单截零，第 1 项不会变。</p>
 <p><strong>多目标不是第 4 个后端，而是一种「策略」</strong>：稠密 <code>lstsq</code> <strong>原生支持 2D <code>y</code></strong>（返回 <code>(n_features, n_targets)</code> 再转置）；只有 <code>nnls</code> 与稀疏 <code>lsqr</code> 因为<strong>只吃 1D <code>y</code></strong>，才<strong>逐列</strong> <code>joblib.Parallel</code> 拼回结果。</p>
 <p><strong><code>rank_</code> / <code>singular_</code> 只在「稠密 且 <code>positive=False</code> 且走 <code>lstsq</code> 分支」时赋值</strong>——它们来自 <code>linalg.lstsq</code> 的返回值；稀疏 LSQR 与 NNLS 路径拿不到，且 <code>positive=True</code> 甚至在 <code>_validate_data</code> 阶段就禁掉了稀疏（L676）。属性文档只说「仅当 <code>X</code> 稠密时可用」，上面这句是它的<strong>精确化</strong>。</p>
 <p><strong><code>n_jobs</code> 的触发条件：多目标 且（稀疏 或 <code>positive=True</code>）</strong>——它是 docstring（L552–558）里一个「条件性参数」，实现中<strong>唯一</strong>的使用处就是上面那两处 <code>Parallel</code>。条件不满足时不走 joblib，但这<strong>不代表底层只有一个线程</strong>：BLAS / LAPACK 仍可能多线程。</p>
@@ -7771,6 +7773,14 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
         <span class="s2">"  # &lt;== 隐式中心化算子（不物化中心化矩阵）"</span><span class="p">,</span>
     <span class="s2">"self._set_intercept(X_offset, y_offset, X_scale)"</span><span class="p">:</span>
         <span class="s2">"  # &lt;== 由偏移量反推 intercept_"</span><span class="p">,</span>
+    <span class="s2">"return X.dot(b) - b.dot(X_offset_scale)"</span><span class="p">:</span>
+        <span class="s2">"  # &lt;== 此处为无 sample_weight 分支"</span><span class="p">,</span>
+    <span class="s2">"return X.T.dot(b) - X_offset_scale * b.sum()"</span><span class="p">:</span>
+        <span class="s2">"  # &lt;== 此处为无 sample_weight 分支"</span><span class="p">,</span>
+    <span class="s2">"return X.dot(b) - sample_weight_sqrt * b.dot(X_offset_scale)"</span><span class="p">:</span>
+        <span class="s2">"  # &lt;== 此处为带 sample_weight 分支（修正项乘 sqrt(w)）"</span><span class="p">,</span>
+    <span class="s2">"return X.T.dot(b) - X_offset_scale * b.dot(sample_weight_sqrt)"</span><span class="p">:</span>
+        <span class="s2">"  # &lt;== 此处为带 sample_weight 分支（修正项乘 sqrt(w)）"</span><span class="p">,</span>
 <span class="p">}</span>
 
 <span class="nb">print</span><span class="p">(</span><span class="s2">"# LinearRegression.fit()（已删 docstring）—— 三类后端分派 + 多目标策略"</span><span class="p">)</span>
@@ -7841,18 +7851,18 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
             if has_sw:
 
                 def matvec(b):
-                    return X.dot(b) - sample_weight_sqrt * b.dot(X_offset_scale)
+                    return X.dot(b) - sample_weight_sqrt * b.dot(X_offset_scale)  # &lt;== 此处为带 sample_weight 分支（修正项乘 sqrt(w)）
 
                 def rmatvec(b):
-                    return X.T.dot(b) - X_offset_scale * b.dot(sample_weight_sqrt)
+                    return X.T.dot(b) - X_offset_scale * b.dot(sample_weight_sqrt)  # &lt;== 此处为带 sample_weight 分支（修正项乘 sqrt(w)）
 
             else:
 
                 def matvec(b):
-                    return X.dot(b) - b.dot(X_offset_scale)
+                    return X.dot(b) - b.dot(X_offset_scale)  # &lt;== 此处为无 sample_weight 分支
 
                 def rmatvec(b):
-                    return X.T.dot(b) - X_offset_scale * b.sum()
+                    return X.T.dot(b) - X_offset_scale * b.sum()  # &lt;== 此处为无 sample_weight 分支
 
             X_centered = sparse.linalg.LinearOperator(  # &lt;== 隐式中心化算子（不物化中心化矩阵）
                 shape=X.shape, matvec=matvec, rmatvec=rmatvec
@@ -7925,13 +7935,14 @@ linear_model : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/l
 <span class="nb">print</span><span class="p">(</span><span class="s2">"[① 约束不活跃] NNLS :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">nnls1</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"    与 OLS 一致:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">ols1</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="n">nnls1</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">))</span>
 
-<span class="c1"># ② 约束活跃：OLS 解含负系数 -&gt; NNLS 把负系数截断，结果不同</span>
+<span class="c1"># ② 约束活跃：OLS 解含负系数 -&gt; 非负约束下重新求解（其余系数也会变），结果不同</span>
 <span class="n">y_active</span> <span class="o">=</span> <span class="n">Xp</span> <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">])</span> <span class="o">+</span> <span class="mf">0.3</span> <span class="o">+</span> <span class="mf">0.01</span> <span class="o">*</span> <span class="n">rng</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">200</span><span class="p">)</span>
 <span class="n">ols2</span> <span class="o">=</span> <span class="n">LinearRegression</span><span class="p">()</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xp</span><span class="p">,</span> <span class="n">y_active</span><span class="p">)</span>
 <span class="n">nnls2</span> <span class="o">=</span> <span class="n">LinearRegression</span><span class="p">(</span><span class="n">positive</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xp</span><span class="p">,</span> <span class="n">y_active</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">()</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"[② 约束活跃] OLS  :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">ols2</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span> <span class="s2">"  &lt;- 第 2 个系数为负，违反非负约束"</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"[② 约束活跃] NNLS :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">nnls2</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span> <span class="s2">"  &lt;- 负系数被截断为 0"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"[② 约束活跃] NNLS :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">nnls2</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span>
+      <span class="s2">"  &lt;- 该系数落到 0 边界，其余系数随之重新优化（非直接截零）"</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"    与 OLS 不同:"</span><span class="p">,</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">ols2</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="n">nnls2</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">),</span>
       <span class="s2">" 且 NNLS 解非负:"</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">nnls2</span><span class="o">.</span><span class="n">coef_</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">)))</span>
 
@@ -7969,7 +7980,7 @@ NNLS模型 hasattr(rank_)     : False
     与 OLS 一致: True
 
 [② 约束活跃] OLS  : [ 0.993113 -2.002491  0.499478  2.99867 ]   &lt;- 第 2 个系数为负，违反非负约束
-[② 约束活跃] NNLS : [1.046862 0.       0.4284   3.042586]   &lt;- 负系数被截断为 0
+[② 约束活跃] NNLS : [1.046862 0.       0.4284   3.042586]   &lt;- 该系数落到 0 边界，其余系数随之重新优化（非直接截零）
     与 OLS 不同: True  且 NNLS 解非负: True
 
 多目标 y2.shape                  : (200, 2)
@@ -8000,6 +8011,7 @@ NNLS模型 hasattr(rank_)     : False
 <li><code>matvec(b)  = X·b  − b·(X_offset / X_scale)</code></li>
 <li><code>rmatvec(b) = Xᵀ·b − (X_offset / X_scale)·b.sum()</code></li>
 </ul>
+<p>（上面两条列出的是<strong>无 <code>sample_weight</code></strong> 的分支（<code>_base.py</code> L729–735）。带权分支（L721–727）的中心化修正项还会乘 <code>sample_weight_sqrt = √w</code>：<code>matvec(b) = X·b − √w·(b·(X_offset / X_scale))</code>、<code>rmatvec(b) = Xᵀ·b − (X_offset / X_scale)·(b·√w)</code>。）</p>
 <p>把「已中心化的 X」表示成一个<strong>只提供矩阵向量乘的算子</strong>喂给 <code>lsqr</code> —— <strong>数学等价、内存不爆</strong>。</p>
 </div>
 </div>
@@ -8191,6 +8203,7 @@ X_scale 是否全为 1 : True
 <h2 id="5.-%E6%A0%B7%E6%9C%AC%E6%9D%83%E9%87%8D%EF%BC%9A%E2%88%9Aw-%E9%87%8D%E7%BC%A9%E6%94%BE%E6%8A%8A-WLS-%E6%8A%98%E6%88%90-OLS%EF%BC%88R4%EF%BC%89">5. 样本权重：√w 重缩放把 WLS 折成 OLS（R4）<a class="anchor-link" href="#5.-%E6%A0%B7%E6%9C%AC%E6%9D%83%E9%87%8D%EF%BC%9A%E2%88%9Aw-%E9%87%8D%E7%BC%A9%E6%94%BE%E6%8A%8A-WLS-%E6%8A%98%E6%88%90-OLS%EF%BC%88R4%EF%BC%89">¶</a></h2><p>带权最小二乘（WLS）要最小化 <code>(y−Xw)ᵀ S (y−Xw)</code>，其中 <code>S = diag(sample_weight)</code>。sklearn 不为此单开一条求解路径，而是利用一个恒等式（<code>_rescale_data</code> docstring L308–312 直接写出）：</p>
 <p>$$(y-Xw)^\top S\,(y-Xw) \;=\; \lVert \sqrt{S}\,y \;-\; \sqrt{S}\,X\,w \rVert_2^2$$</p>
 <p>于是<strong>加权最小二乘 ≡ 对 <code>√S·X, √S·y</code> 做普通最小二乘</strong> —— 权重被吸收进数据本身。教科书只给 WLS 的正规方程，不会讲这层变换。</p>
+<p><strong>注意顺序与截距</strong>：有截距时，必须先按样本权重对 <code>X</code>、<code>y</code> 中心化，再做 <code>√w</code> 缩放，然后求解<strong>无截距</strong>问题，最后用 <code>intercept_ = ȳ_w − X̄_w·coef_</code> 重构截距（即 <code>_preprocess_data → _rescale_data → 无截距求解 → _set_intercept</code>）。不能直接对原始 <code>X</code>、<code>y</code> 乘 <code>√w</code> 后用默认带截距模型。</p>
 <p>实现上还有个 <code>inplace</code> 优化（L338–341）：仅当 <code>_preprocess_data</code> 已经复制过数据时才原地缩放，避免多一次拷贝。</p>
 </div>
 </div>
@@ -8310,6 +8323,28 @@ def _rescale_data(X, y, sample_weight, inplace=False):
 <span class="nb">print</span><span class="p">(</span><span class="s2">"intercept_ 一致          :"</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">m_weighted</span><span class="o">.</span><span class="n">intercept_</span><span class="p">,</span> <span class="n">m_repeat</span><span class="o">.</span><span class="n">intercept_</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">)))</span>
 <span class="nb">print</span><span class="p">()</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"sqrt(sw) 前 5 个         :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">sw</span><span class="p">[:</span><span class="mi">5</span><span class="p">]),</span> <span class="mi">4</span><span class="p">))</span>
+
+<span class="c1"># 直接复现内部变换流程：加权中心化 -&gt; √w 缩放 -&gt; 无截距求解 -&gt; 重构截距</span>
+<span class="c1"># （上面的 X、y 为 60 样本，而下面权重长度为 200，故此处另取一份条件良好的 200 样本数据）</span>
+<span class="n">X</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">RandomState</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">200</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="n">y</span> <span class="o">=</span> <span class="n">X</span> <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">3.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">])</span> <span class="o">+</span> <span class="mf">1.0</span> <span class="o">+</span> <span class="mf">0.05</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">RandomState</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">200</span><span class="p">)</span>
+<span class="n">sw</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">RandomState</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">200</span><span class="p">)</span> <span class="o">+</span> <span class="mf">0.2</span>
+<span class="n">Xo</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">average</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">weights</span><span class="o">=</span><span class="n">sw</span><span class="p">)</span>        <span class="c1"># 加权列均值</span>
+<span class="n">yo</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">average</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">weights</span><span class="o">=</span><span class="n">sw</span><span class="p">)</span>        <span class="c1"># 加权 y 均值</span>
+<span class="n">Xc</span><span class="p">,</span> <span class="n">yc</span> <span class="o">=</span> <span class="n">X</span> <span class="o">-</span> <span class="n">Xo</span><span class="p">,</span> <span class="n">y</span> <span class="o">-</span> <span class="n">yo</span>                       <span class="c1"># 按样本权重中心化</span>
+<span class="n">wsq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">sw</span><span class="p">)</span>
+<span class="n">Xs</span><span class="p">,</span> <span class="n">ys</span> <span class="o">=</span> <span class="n">Xc</span> <span class="o">*</span> <span class="n">wsq</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">],</span> <span class="n">yc</span> <span class="o">*</span> <span class="n">wsq</span>          <span class="c1"># √w 缩放</span>
+<span class="n">inner</span> <span class="o">=</span> <span class="n">LinearRegression</span><span class="p">(</span><span class="n">fit_intercept</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">ys</span><span class="p">)</span>   <span class="c1"># 求解无截距问题</span>
+<span class="n">manual_coef</span> <span class="o">=</span> <span class="n">inner</span><span class="o">.</span><span class="n">coef_</span>
+<span class="n">manual_intercept</span> <span class="o">=</span> <span class="n">yo</span> <span class="o">-</span> <span class="n">Xo</span> <span class="o">@</span> <span class="n">manual_coef</span>      <span class="c1"># 重构截距</span>
+
+<span class="n">ref</span> <span class="o">=</span> <span class="n">LinearRegression</span><span class="p">()</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">sample_weight</span><span class="o">=</span><span class="n">sw</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"手工流程 coef_  :"</span><span class="p">,</span> <span class="n">manual_coef</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"模型 coef_      :"</span><span class="p">,</span> <span class="n">ref</span><span class="o">.</span><span class="n">coef_</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"coef_ 一致      :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">manual_coef</span><span class="p">,</span> <span class="n">ref</span><span class="o">.</span><span class="n">coef_</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"手工 intercept_ :"</span><span class="p">,</span> <span class="n">manual_intercept</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"模型 intercept_ :"</span><span class="p">,</span> <span class="n">ref</span><span class="o">.</span><span class="n">intercept_</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"intercept_ 一致 :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">manual_intercept</span><span class="p">,</span> <span class="n">ref</span><span class="o">.</span><span class="n">intercept_</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
@@ -8328,6 +8363,12 @@ coef_ 一致(allclose)     : True
 intercept_ 一致          : True
 
 sqrt(sw) 前 5 个         : [1.4142 1.     1.     1.7321 1.    ]
+手工流程 coef_  : [ 1.00326196 -2.99444072  2.00864013]
+模型 coef_      : [ 1.00326196 -2.99444072  2.00864013]
+coef_ 一致      : True
+手工 intercept_ : 0.9964822472730329
+模型 intercept_ : 0.9964822472730329
+intercept_ 一致 : True
 </pre>
 </div>
 </div>
@@ -8351,6 +8392,7 @@ sqrt(sw) 前 5 个         : [1.4142 1.     1.     1.7321 1.    ]
 <p>一个有意思的耦合：<code>learning_rate='optimal'</code> 时要求 <code>alpha &gt; 0</code>（<code>_more_validate_params</code> L145–159），因为最优步长 <code>η = 1/(α(t+t₀))</code> <strong>直接拿 alpha 算</strong> —— 正则强度兼职学习率尺度。</p>
 <p>另一个容易忽略的差异：<strong><code>BaseSGDRegressor</code> 的默认与基类 <code>BaseSGD</code> 不同</strong> —— 回归器默认 <code>invscaling / eta0=0.01 / power_t=0.25</code>（L1397–1399），基类默认 <code>optimal / eta0=0.0 / power_t=0.5</code>（L111–113）。</p>
 <p>最后是「Python 配置 → C 数据视图」的桥梁 <code>make_dataset</code>（<code>_base.make_dataset</code> L136–186）：按 <code>X.dtype</code> 分派 <code>ArrayDataset32 / CSRDataset32</code> 或 <code>...64</code>，C 内循环靠它随机访问单样本。</p>
+<p>下面用 <code>_get_loss_function</code> 与 <code>_fit_regressor</code> 的实际调用片段把这条链补全。</p>
 </div>
 </div>
 </div>
@@ -8522,6 +8564,78 @@ def make_dataset(X, y, sample_weight, random_state=None):
 </div>
 </div>
 </div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=sgd_config_to_c_inner">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [10]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="cm-editor cm-s-jupyter">
+<div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model</span><span class="w"> </span><span class="kn">import</span> <span class="n">SGDRegressor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model._stochastic_gradient</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseSGD</span><span class="p">,</span> <span class="n">BaseSGDRegressor</span>
+
+<span class="c1"># ① loss 字符串 -&gt; Cython LossFunction 对象</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">inspect</span><span class="o">.</span><span class="n">getsource</span><span class="p">(</span><span class="n">BaseSGD</span><span class="o">.</span><span class="n">_get_loss_function</span><span class="p">))</span>
+
+<span class="c1"># loss_functions 注册表：字符串 -&gt; (_sgd_fast 里的 Cython 类, 附加参数)</span>
+<span class="n">reg</span> <span class="o">=</span> <span class="n">SGDRegressor</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"loss_functions 的键 :"</span><span class="p">,</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">reg</span><span class="o">.</span><span class="n">loss_functions</span><span class="o">.</span><span class="n">keys</span><span class="p">()))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"squared_error 对应的类 :"</span><span class="p">,</span> <span class="n">reg</span><span class="o">.</span><span class="n">loss_functions</span><span class="p">[</span><span class="s2">"squared_error"</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"实例化后的 loss 对象    :"</span><span class="p">,</span> <span class="n">reg</span><span class="o">.</span><span class="n">_get_loss_function</span><span class="p">(</span><span class="s2">"squared_error"</span><span class="p">))</span>
+
+<span class="c1"># ② _fit_regressor 里的实际调用链：建 dataset -&gt; 选 _plain_sgd -&gt; 调用它</span>
+<span class="n">src</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getsource</span><span class="p">(</span><span class="n">BaseSGDRegressor</span><span class="o">.</span><span class="n">_fit_regressor</span><span class="p">)</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span>
+<span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">src</span><span class="p">):</span>
+    <span class="k">if</span> <span class="s2">"dataset, intercept_decay = make_dataset"</span> <span class="ow">in</span> <span class="n">l</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">src</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="mi">4</span><span class="p">]))</span>
+    <span class="k">if</span> <span class="s2">"_plain_sgd = _get_plain_sgd_function"</span> <span class="ow">in</span> <span class="n">l</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"        ..."</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">src</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="mi">9</span><span class="p">]))</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell-outputWrapper">
+<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
+</div>
+<div class="jp-OutputArea jp-Cell-outputArea">
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>    def _get_loss_function(self, loss):
+        """Get concrete ``LossFunction`` object for str ``loss``."""
+        loss_ = self.loss_functions[loss]
+        loss_class, args = loss_[0], loss_[1:]
+        if loss in ("huber", "epsilon_insensitive", "squared_epsilon_insensitive"):
+            args = (self.epsilon,)
+        return loss_class(*args)
+
+loss_functions 的键 : ['epsilon_insensitive', 'huber', 'squared_epsilon_insensitive', 'squared_error']
+squared_error 对应的类 : &lt;class 'sklearn.linear_model._sgd_fast.SquaredLoss'&gt;
+实例化后的 loss 对象    : &lt;sklearn.linear_model._sgd_fast.SquaredLoss object at 0x70d51a8ddaf0&gt;
+        dataset, intercept_decay = make_dataset(
+            X, y, sample_weight, random_state=random_state
+        )
+
+        ...
+        _plain_sgd = _get_plain_sgd_function(input_dtype=coef.dtype)
+        coef, intercept, average_coef, average_intercept, self.n_iter_ = _plain_sgd(
+            coef,
+            intercept[0],
+            average_coef,
+            average_intercept[0],
+            loss_function,
+            penalty_type,
+            alpha,
+</pre>
+</div>
+</div>
+</div>
+</div>
 </div>
 <div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=706f1636">
 <div class="jp-Cell-inputWrapper" tabindex="0">
@@ -8529,8 +8643,9 @@ def make_dataset(X, y, sample_weight, random_state=None):
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="7.-SGD-%E7%9A%84%E4%BC%98%E5%8C%96%E7%8A%B6%E6%80%81%EF%BC%9At_-/-ASGD-/-%E9%AA%8C%E8%AF%81%E6%8E%A9%E7%A0%81-/-%E6%88%AA%E8%B7%9D%E8%A1%B0%E5%87%8F%EF%BC%88R10/R11/R12/R13%EF%BC%89">7. SGD 的优化状态：t_ / ASGD / 验证掩码 / 截距衰减（R10/R11/R12/R13）<a class="anchor-link" href="#7.-SGD-%E7%9A%84%E4%BC%98%E5%8C%96%E7%8A%B6%E6%80%81%EF%BC%9At_-/-ASGD-/-%E9%AA%8C%E8%AF%81%E6%8E%A9%E7%A0%81-/-%E6%88%AA%E8%B7%9D%E8%A1%B0%E5%87%8F%EF%BC%88R10/R11/R12/R13%EF%BC%89">¶</a></h2><p>SGD 的进度不是「轮数」，而是<strong>累计样本数</strong>：<code>self.t_ += self.n_iter_ * X.shape[0]</code>（L1716），供 invscaling / optimal 的时间表使用。</p>
+<h2 id="7.-SGD-%E7%9A%84%E4%BC%98%E5%8C%96%E7%8A%B6%E6%80%81%EF%BC%9At_-/-ASGD-/-%E9%AA%8C%E8%AF%81%E6%8E%A9%E7%A0%81-/-%E6%88%AA%E8%B7%9D%E8%A1%B0%E5%87%8F%EF%BC%88R10/R11/R12/R13%EF%BC%89">7. SGD 的优化状态：t_ / ASGD / 验证掩码 / 截距衰减（R10/R11/R12/R13）<a class="anchor-link" href="#7.-SGD-%E7%9A%84%E4%BC%98%E5%8C%96%E7%8A%B6%E6%80%81%EF%BC%9At_-/-ASGD-/-%E9%AA%8C%E8%AF%81%E6%8E%A9%E7%A0%81-/-%E6%88%AA%E8%B7%9D%E8%A1%B0%E5%87%8F%EF%BC%88R10/R11/R12/R13%EF%BC%89">¶</a></h2><p><code>t_</code> 是学习率调度（<code>invscaling</code> / <code>optimal</code>）使用的<strong>时间步计数器</strong>：初值为 1，普通训练下每轮增加 <code>n_samples</code>（因此它常等于累计样本数，但本质是时间步，不是样本计数）——<code>self.t_ += self.n_iter_ * X.shape[0]</code>（L1716）。</p>
 <p>关键细节：<strong><code>fit</code> 每次调用都会把 <code>t_</code> 重置为 1.0</strong> —— 这行位于 <code>warm_start</code> 分支<strong>之后</strong>（L1540–1541），所以 <strong>即使 <code>warm_start=True</code> 也照样重置</strong>；只有 <code>partial_fit</code> 走 <code>_partial_fit</code>（L1506）、<strong>不重置</strong>，<code>_fit_regressor</code> 仅在 <code>t_</code> 不存在时才补 1.0（L1653–1654）。因此「跨调用累积」<strong>只对 <code>partial_fit</code> 成立</strong>。</p>
+<p>本节 code 实测（<code>n_samples = 394</code>）：连续两次 <code>partial_fit</code> 使 <code>t_</code> 由 <code>395</code> 递增到 <code>789</code>，随后调用 <code>fit</code> 回落为 <code>395</code>；<code>warm_start=True</code> 同样在 <code>fit</code> 后重置（<code>789 → 395</code>）。</p>
 <p><code>average=True</code> 是<strong>平均 SGD（ASGD）</strong>：除 <code>coef_</code> 外另存 <code>_standard_coef</code> / <code>_average_coef</code>，对迭代过程中的权重做<strong>历史平均</strong>；且只有满足 <code>average &lt;= t_ − 1</code> 时才真正使用平均值（L1722–1728）。</p>
 <p>验证集不是一份新数据，而是<strong>同一数组上的 bool 掩码</strong>（<code>_make_validation_split</code> L275 / L309），训练循环据此跳过；但验证回调<strong>确实做了布尔索引</strong> <code>X[validation_mask] / y[validation_mask] / sample_weight[validation_mask]</code>（<code>_make_validation_score_cb</code> L318–322）来构造评估对象。所以准确说法是「<strong>训练侧不复制、验证侧按掩码提取子集</strong>」，而不是「X 不复制」。</p>
 <p>最后一个纯工程 corner case：稀疏数据的<strong>截距更新要乘 <code>SPARSE_INTERCEPT_DECAY = 0.01</code></strong>（源码注释：<em>avoid intercept oscillation</em>），稠密则为 <code>1.0</code>（<code>_base.make_dataset</code> L178–184）。</p>
@@ -8542,7 +8657,7 @@ def make_dataset(X, y, sample_weight, random_state=None):
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [10]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [11]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
@@ -8592,13 +8707,7 @@ def make_dataset(X, y, sample_weight, random_state=None):
         self.t_ = 1.0
 
         self._partial_fit(
-</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>
+
 # BaseSGDRegressor._fit_regressor() —— t_ 累加的是「累计样本数」
         self.t_ += self.n_iter_ * X.shape[0]
 
@@ -8629,7 +8738,7 @@ def make_dataset(X, y, sample_weight, random_state=None):
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [11]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [12]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
@@ -8641,20 +8750,23 @@ def make_dataset(X, y, sample_weight, random_state=None):
 <span class="n">X</span> <span class="o">=</span> <span class="n">rng</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">394</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
 <span class="n">y</span> <span class="o">=</span> <span class="n">X</span> <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">])</span> <span class="o">+</span> <span class="mf">0.5</span>
 
-<span class="c1"># --- t_：partial_fit 累积 vs fit 重置 ---</span>
+<span class="c1"># --- t_：先连续两次 partial_fit（t_ 递增），再 fit（t_ 回落）---</span>
 <span class="n">sgd</span> <span class="o">=</span> <span class="n">SGDRegressor</span><span class="p">(</span><span class="n">max_iter</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
 <span class="n">sgd</span><span class="o">.</span><span class="n">partial_fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"after partial_fit #1 : t_ ="</span><span class="p">,</span> <span class="n">sgd</span><span class="o">.</span><span class="n">t_</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"partial_fit #1 -&gt; t_ ="</span><span class="p">,</span> <span class="n">sgd</span><span class="o">.</span><span class="n">t_</span><span class="p">)</span>
 <span class="n">sgd</span><span class="o">.</span><span class="n">partial_fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"after partial_fit #2 : t_ ="</span><span class="p">,</span> <span class="n">sgd</span><span class="o">.</span><span class="n">t_</span><span class="p">,</span> <span class="s2">"  &lt;- 延续累加"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"partial_fit #2 -&gt; t_ ="</span><span class="p">,</span> <span class="n">sgd</span><span class="o">.</span><span class="n">t_</span><span class="p">,</span> <span class="s2">"  &lt;- 递增，不重置"</span><span class="p">)</span>
 <span class="n">sgd</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"after fit            : t_ ="</span><span class="p">,</span> <span class="n">sgd</span><span class="o">.</span><span class="n">t_</span><span class="p">,</span> <span class="s2">"  &lt;- fit 无条件重置为 1.0 后再累加一轮样本数"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"fit            -&gt; t_ ="</span><span class="p">,</span> <span class="n">sgd</span><span class="o">.</span><span class="n">t_</span><span class="p">,</span> <span class="s2">"  &lt;- 回落：fit 无条件重置为 1.0 后再累加一轮样本数"</span><span class="p">)</span>
 
+<span class="c1"># --- warm_start=True：同样 partial_fit -&gt; partial_fit -&gt; fit，fit 后仍重置 ---</span>
 <span class="n">sgd_ws</span> <span class="o">=</span> <span class="n">SGDRegressor</span><span class="p">(</span><span class="n">max_iter</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">warm_start</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <span class="n">sgd_ws</span><span class="o">.</span><span class="n">partial_fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"warm_start 下 partial_fit -&gt; t_ ="</span><span class="p">,</span> <span class="n">sgd_ws</span><span class="o">.</span><span class="n">t_</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"warm_start partial_fit #1 -&gt; t_ ="</span><span class="p">,</span> <span class="n">sgd_ws</span><span class="o">.</span><span class="n">t_</span><span class="p">)</span>
+<span class="n">sgd_ws</span><span class="o">.</span><span class="n">partial_fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"warm_start partial_fit #2 -&gt; t_ ="</span><span class="p">,</span> <span class="n">sgd_ws</span><span class="o">.</span><span class="n">t_</span><span class="p">,</span> <span class="s2">"  &lt;- 递增"</span><span class="p">)</span>
 <span class="n">sgd_ws</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"warm_start 下 fit         -&gt; t_ ="</span><span class="p">,</span> <span class="n">sgd_ws</span><span class="o">.</span><span class="n">t_</span><span class="p">,</span> <span class="s2">"  &lt;- warm_start=True 也照样重置"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"warm_start fit            -&gt; t_ ="</span><span class="p">,</span> <span class="n">sgd_ws</span><span class="o">.</span><span class="n">t_</span><span class="p">,</span> <span class="s2">"  &lt;- warm_start=True 也照样重置"</span><span class="p">)</span>
 
 <span class="c1"># --- 验证掩码：同一数组上的 bool mask ---</span>
 <span class="n">mask_off</span> <span class="o">=</span> <span class="n">sgd</span><span class="o">.</span><span class="n">_make_validation_split</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">sample_mask</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">))</span>
@@ -8699,11 +8811,12 @@ def make_dataset(X, y, sample_weight, random_state=None):
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>after partial_fit #1 : t_ = 395.0
-after partial_fit #2 : t_ = 789.0   &lt;- 延续累加
-after fit            : t_ = 395.0   &lt;- fit 无条件重置为 1.0 后再累加一轮样本数
-warm_start 下 partial_fit -&gt; t_ = 395.0
-warm_start 下 fit         -&gt; t_ = 395.0   &lt;- warm_start=True 也照样重置
+<pre>partial_fit #1 -&gt; t_ = 395.0
+partial_fit #2 -&gt; t_ = 789.0   &lt;- 递增，不重置
+fit            -&gt; t_ = 395.0   &lt;- 回落：fit 无条件重置为 1.0 后再累加一轮样本数
+warm_start partial_fit #1 -&gt; t_ = 395.0
+warm_start partial_fit #2 -&gt; t_ = 789.0   &lt;- 递增
+warm_start fit            -&gt; t_ = 395.0   &lt;- warm_start=True 也照样重置
 
 early_stopping=False 时 validation_mask: [False] （空掩码 -&gt; 全用训练集）
 early_stopping=True  时 validation_mask: shape=(394,) dtype=bool 验证样本数=79
@@ -8730,10 +8843,10 @@ SPARSE_INTERCEPT_DECAY = 0.01
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h2 id="8.-%E5%B0%8F%E7%BB%93">8. 小结<a class="anchor-link" href="#8.-%E5%B0%8F%E7%BB%93">¶</a></h2><p>把两条主线串成一句：<strong>「Python 分派台 + C 内循环」</strong>。</p>
 <ul>
-<li><strong>OLS 的 Python 侧只做分派</strong>：<code>positive</code> → NNLS、稀疏 → LSQR、稠密 → SVD（<code>lstsq</code>）；多目标不是新后端而是策略（原生 2D 或逐列 <code>Parallel</code>）；<code>rank_</code> / <code>singular_</code> 只是 <code>lstsq</code> 的「附带产物」，因此只在「稠密 + <code>positive=False</code>」路径上存在。分派依据是 <strong><code>dtype</code> / 形状 / 稀疏 / <code>positive</code> / 多目标</strong>。</li>
+<li><strong>sklearn 的 Python 侧做的是预处理（中心化 / 归一化）、样本权重缩放、求解器分派与截距重构</strong>：<code>positive</code> → NNLS、稀疏 → LSQR、稠密 → SVD（<code>lstsq</code>）；多目标不是新后端而是策略（原生 2D 或逐列 <code>Parallel</code>）；<code>rank_</code> / <code>singular_</code> 只是 <code>lstsq</code> 的「附带产物」，因此只在「稠密 + <code>positive=False</code>」路径上存在。分派依据是 <strong><code>dtype</code> / 形状 / 稀疏 / <code>positive</code> / 多目标</strong>。</li>
 <li><strong>截距、权重、中心化都不改变算法</strong>，而是通过<strong>等价变换</strong>把问题折成标准形式：去均值重构截距、<code>√w</code> 重缩放吸收权重、<code>LinearOperator</code> 隐式中心化保住稀疏性。</li>
 <li><strong>SGD 的 Python 侧是配置台</strong>（字符串 → 枚举 → C 参数），真正的迭代在 <code>_sgd_fast</code>；优化状态（<code>t_</code>、ASGD、验证掩码、<code>intercept_decay</code>）由 Python 与 C 共同维护。</li>
-<li><strong>数值稳定性不由 sklearn 自己负责</strong>，而是交给 scipy 后端（SVD / LSQR / NNLS）兜底 —— 这是「用成熟数值库，而不是手写正规方程」的直接后果。</li>
+<li><strong>sklearn 负责预处理与求解器组织，核心数值求解委托给 SciPy</strong>（SVD / LSQR / NNLS）—— 这是「用成熟数值库，而不是手写正规方程」的直接后果。</li>
 </ul>
 </div>
 </div>
