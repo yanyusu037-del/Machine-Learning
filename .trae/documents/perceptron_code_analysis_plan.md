@@ -7,10 +7,10 @@
 
 用户提问：**「感知机有什么类似的内容可以做的」**。澄清结果：
 
-- **交付形式**：只出方向清单，暂不产出 notebook / HTML（同 hw3 朴素贝叶斯、hw4 线性回归的第一版）。
+- **交付形式**：先出方向清单（同 hw3 朴素贝叶斯、hw4 线性回归第一版）；随后用户确认，已按本清单产出 `homework5-Perceptron.ipynb` 与 `.html`。
 - **覆盖范围**：只讲 `Perceptron` 本身。
 - **筛选标准**（沿用 hw2 / hw3 / hw4）：优先「课堂上讲不透 / 没讲、且是 sklearn 工程实现的真实决策」。
-- **核心叙事**：`Perceptron` 不是独立算法，而是 `BaseSGDClassifier` 的**一组被锁死的默认配置** + 损失表里 `Hinge(θ=0)` 这一行。源码 221 行中，docstring 独占 158 行（L10–167），真正实现只有 53 行（L169–221）。
+- **核心叙事**：sklearn 的 `Perceptron` **类没有单独实现训练循环**，而是复用 `BaseSGDClassifier` 的 SGD 框架——它只是**一组被锁死的默认配置** + 损失表里 `Hinge(θ=0)` 这一行。行数要分两把尺子量：**文件 221 行**、**类体 213 行**（L9–221）；类体里 docstring 占 158 行（L10–167），其余 55 行才是实现（L169–221，且不含文件顶部的 8 行 import）。
 
 ---
 
@@ -36,7 +36,7 @@
 
 | 文件 | 行数 | 可分析性 |
 |---|---|---|
-| `sklearn/linear_model/_perceptron.py` | 221 | 纯 Python；L10–167 是 docstring（158 行），L169–221 是实现（53 行） |
+| `sklearn/linear_model/_perceptron.py` | 221（文件）/ 213（类体） | 纯 Python；类体 L9–221，其中 L10–167 docstring（158 行），L169–221 是实现（55 行，不含顶部 import） |
 | `sklearn/linear_model/_stochastic_gradient.py` | 2574 | 纯 Python，外层流程全可 dump |
 | `sklearn/linear_model/_sgd_fast.pyx` | 不存在 | 本地包没有 `.pyx` |
 | `sklearn/linear_model/_sgd_fast.pxd` | 26 | 只声明 `LossFunction / Regression / Classification / Log / SquaredLoss`，**不暴露 Hinge** |
@@ -49,7 +49,7 @@
 
 1. **等价性**：`Perceptron(random_state=0)` 与
    `SGDClassifier(loss="perceptron", penalty=None, eta0=1.0, learning_rate="constant", random_state=0)`
-   在 60 个样本上 `coef_` / `intercept_` / `n_iter_` **逐元素完全相等**（`np.array_equal` 为 True；`n_iter_=15`，`t_=901`）。
+   在 60 个样本上 `coef_` / `intercept_` / `n_iter_` **逐元素完全相等**（`np.array_equal` 为 True；`n_iter_=15`，`t_=901`）。注意区分措辞：`np.allclose` 只能支持「**数值近似一致**」，不要说成「完全一致」。
 2. **损失映射**：`_stochastic_gradient.py` L499–509 的 `loss_functions` 表中，
    `"perceptron": (Hinge, 0.0)`（L502），而 `"hinge": (Hinge, 1.0)`（L500）。同一个 `Hinge` 类，只差一个阈值参数。
 3. **Hinge 阈值行为**（构造 `X=[[1],[5]]`, `y=[1,0]`, `sample_weight=[1,0]`, `coef_init=0`, `intercept_init=m`）：
@@ -57,25 +57,28 @@
    - `m=2.0`：两者都不更新；
    - `m=-0.5`：两者都更新；Perceptron 步长 1.0（`eta0=1` + `learning_rate="constant"`），hinge 默认 `learning_rate="optimal"` 下步长 10.0（对照时必须显式改 constant）。
    → `Hinge(θ=0)` 的判定退化为「零分界」，`Hinge(θ=1)` 是「间隔 1 的线性 SVM」。
-4. **教科书循环可复现**：`make_blobs(n_samples=200, centers=2, random_state=7, cluster_std=2.0)`，标签映射为 ±1，手工循环
+4. **教科书循环可复现（严格不可分数据）**：`make_blobs(n_samples=200, centers=2, random_state=7, cluster_std=2.0)` 的两簇只是**有重叠**，重叠不等于不存在线性分界，**不能用来证明不可分**。因此在末尾追加 **2 组「相同特征、相反标签」的矛盾样本对**（`[[0,0],[0,0],[5,5],[5,5]]` / `[-1,1,-1,1]`），矛盾对存在即保证任何线性模型都不可能全分对。此时手工循环
    `if y*(x@w+b) <= 0: w += y*x; b += y`，配合 `shuffle=False, tol=None, max_iter=1000`，
-   与 sklearn 的 `coef_` / `intercept_` **完全一致**（共 14526 次更新；sklearn `n_iter_=1000`、`t_=200001`）。
-   同一份数据若用默认 `tol=1e-3`，60 样本的案例只跑 `n_iter_=15` 就停。
-5. **`t_` 语义**：docstring（`_perceptron.py` L137–139）称「Number of weight updates… Same as `(n_iter_ * n_samples + 1)`」，
-   实测它是**处理过的样本数 + 1**：
-   - 二分类 60 样本 × 15 轮 → `t_=901 = 15*60+1`；
-   - digits 多分类 1797 样本 × 22 轮 → `t_=39535 = 22*1797+1`；
-   - `early_stopping=True` 时 100 样本 × 6 轮 → `t_=601`；
-   - `partial_fit` 两次 → `t_` 101 → 201，而 `n_iter_` 始终为 1。
+   与 sklearn 的 `coef_` / `intercept_` **数值近似一致（`np.allclose`）**（共 18583 次更新；sklearn `n_iter_=1000`、`t_=204001`、`coef[:2]=[8.3589, -7.1631]`、`b=75.0`）。
+   把判据换成 `< 0` 则**首轮 0 次更新就「收敛」**（零初始化下 `z` 全为 0，`<` 无一命中），与 sklearn 不一致——这同时钉死了「折点取等号」和「零点不可微」两件事。
+   同一份数据若用默认 `tol=1e-3`，60 样本的可分案例只跑 `n_iter_=7` 就停。
+5. **`t_` 语义（限定适用范围）**：docstring（`_perceptron.py` L137–139）称「Number of weight updates performed during training. Same as `(n_iter_ * n_samples + 1)`」。**这个说法不能按字面读，但「处理样本数 + 1」也不是普遍精确的解释**：`t_` 是**按迭代轮数和输入样本数维护的计数属性**，仅在「单次 `fit`、二分类、无 Smart 分片」时才恰好等于 `n_iter_ × n_samples + 1`：
+   - 二分类 60 样本 × 15 轮 → `t_=901`；
+   - digits 多分类 1797 样本 × 22 轮 → `t_=39535`，但 22 是**各 OvA 二分类 `n_iter_` 的最大值**（`_fit_multiclass` L794–801），不对应任何一个二分类器的真实遍历量；
+   - `early_stopping=True` 时 120 样本 × 11 轮 → `t_=1321`：**外层公式仍用完整输入样本数**，被切出去当验证集的样本照样计入；
+   - P3 的非可分实验里 `t_=204001` vs 实际更新 18583 次——差距来自「轮数 × 样本数」这个定义本身。
+   - `partial_fit` 两次 → `t_` 61 → 121，而 `n_iter_` 始终为 1。
+   → 稳妥表述：**`t_` 是按迭代轮数和输入样本数维护的计数属性，不能直接解释为参数实际改变的次数。**
 6. **稀疏截距衰减**：`make_dataset`（`_base.py` L178–184）对稀疏输入返回 `intercept_decay=SPARSE_INTERCEPT_DECAY=0.01`，稠密返回 1.0。
    同一份 `make_blobs(100, random_state=3, cluster_std=1.5)` 数据，`shuffle=False, max_iter=30, tol=None`：
    - 稠密：`intercept_=3.0`，`coef_≈[-9.90, -7.04]`；
    - 稀疏（`csr_matrix`）：`intercept_=0.14`，`coef_≈[-9.38, -8.87]`；
    - 两者 `t_` 都是 3001。
-7. **停止条件**：`tol=None, max_iter=3` **不报警**；`tol=1e-3, max_iter=3` 报 `ConvergenceWarning`（`_stochastic_gradient.py` L708–720）。
+7. **停止条件（P6）**：`tol` 的判据**不是与上一轮比**，而是与**历史最优损失** `best_loss` 比。源码 docstring（`_stochastic_gradient.py` L996–1002）原文：*training will stop when `(loss > best_loss - tol)` for `n_iter_no_change` consecutive epochs.* 即**连续 `n_iter_no_change` 轮（默认 5）改善都不足 `tol` 才停**。`tol=None` → 阈值被换成 `-inf`（L450），永不早停，且因 `self.tol is not None` 不成立（L708–712）连 `ConvergenceWarning` 都不报。
+   实测「耐心计数」随参数线性推迟停止（`n_iter_no_change=1/5/20/100` → `n_iter_=2/11/45/234`）。
 8. **参数校验时机分两类**（已实测修正）：
-   - 参数**不在签名里** → **构造期 TypeError**：`Perceptron(average=True)`、`Perceptron(loss="hinge")`；
-   - 参数**越界** → **构造通过，`fit` 期才报错**（1.3 的参数校验挂在 `fit` 的装饰器上）：
+   - 参数**根本不在签名里** → **构造期 TypeError**：`Perceptron(average=True)`、`Perceptron(loss="hinge")`。这才是「禁止改损失 / 禁止开 ASGD」的**直接原因**；类体里的 `_parameter_constraints.pop("loss")` / `.pop("average")` **只是移除这两个键对应的参数校验约束**（继承自基类，签名里既然没有就不该再校验），它本身不阻止任何调用。
+   - 参数**越界** → **构造通过，`fit` 期才报错**（1.3 的参数校验挂在 `fit` 的 `@_fit_context` 装饰器上）：
      `Perceptron(eta0=0.0)` → `ValueError: eta0 must be > 0`（`_more_validate_params` L149–153）；
      `Perceptron(alpha=-1.0)` → `fit` 期 `InvalidParameterError`；
    - `Perceptron(penalty="l1")` → 正常 fit（会正则化，偏离教科书）。
@@ -86,15 +89,33 @@
 
 ## 「值得分析的硬核差异点」
 
+### 前置：一次 `fit` 的调用链（读者应先看这张图）
+
+`Perceptron` **自己没有 `fit`**（`"fit" in Perceptron.__dict__` 为 `False`，`Perceptron.fit.__qualname__ == "BaseSGDClassifier.fit"`）。整条链上每一层都属于基类或编译模块：
+
+```
+Perceptron.fit                        # 继承 BaseSGDClassifier.fit（L877，被 @_fit_context 装饰）
+  → BaseSGDClassifier._fit            # L655：重置 t_、处理 warm_start、交给 _partial_fit
+  → BaseSGDClassifier._partial_fit    # L571：算 class_weight，按 n_classes 分流
+  → BaseSGDClassifier._fit_binary     # L723：二分类（也是 OvA 的单个 job）
+    / BaseSGDClassifier._fit_multiclass  # L757：多分类，joblib 并行
+  → fit_binary                        # L359：准备 dataset、解析随机种子
+  → _plain_sgd64 / _plain_sgd32       # Cython `_sgd_fast._plain_sgd64`（.so）
+  → Hinge.dloss                       # 就在 Cython 里逐样本调用
+```
+
+三个要点：① `Perceptron` 只是「一行配置」（`loss="perceptron"` + 几个默认值）；② 二分类 / 多分类在 `_partial_fit` 处分叉；③ 真正的训练循环在 `.so` 里，只有损失对象能通过 `py_loss` / `py_dloss` 从 Python 侧读到判据。`fit` 上挂的 `@_fit_context` 正是 P1 里「越界参数要到 `fit` 期才报错」的原因。
+
+（行号由 `inspect.getsourcelines` + 文本扫描程序化取得，脚本已复核。）
+
 ### 主线（必做，P1–P5）
 
-#### P1｜221 行里 158 行是 docstring：`Perceptron` 是「减法 API」的预设档位
+#### P1｜文件 221 行 / 类体 213 行：`Perceptron` 是「减法 API」的预设档位
 
-- **位置**：`_perceptron.py` L10–167（docstring）、L169–179（约束字典）、L181–221（`__init__`）。
-- **做法**：`_parameter_constraints` 先继承 `BaseSGDClassifier` 的约束表，然后
-  `pop("loss")`、`pop("average")`；`__init__` 硬编码
-  `loss="perceptron"`、`learning_rate="constant"`、`eta0=1.0`、`power_t=0.5`，其余参数原样转发给基类。
-- **为什么不一样**：课堂上「感知机」是一种算法；在这里它是**一个估计器的预设档位**——把基类最关键的 `loss` 与 `average` 两个公开参数从 API 里删掉，防止用户改损失或开权重平均。默认 `penalty=None` 只是「不加正则」，但 `alpha=0.0001` / `l1_ratio=0.15` 仍留在签名里，形成「有参数、默认无效」的错位。
+- **位置**：`_perceptron.py` 文件共 221 行；类体 L9–221（213 行），其中 L10–167 是 docstring（158 行）、L169–179 约束字典、L181–221 `__init__`；文件顶部 L1–8 是 import（不在类体内）。
+- **做法**：`__init__` 签名里**不放** `loss` / `average`，并硬编码
+  `loss="perceptron"`、`learning_rate="constant"`、`eta0=1.0`、`power_t=0.5`，其余参数原样转发给基类；类体的 `_parameter_constraints` 先继承 `BaseSGDClassifier` 的约束表，再 `pop("loss")`、`pop("average")`——**只是移除这两个键的校验约束**，不是"禁止"的来源。
+- **为什么不一样**：课堂上「感知机」是一种算法；在这里它是**一个估计器的预设档位**。真正的「减法」发生在**签名**上：`loss` 与 `average` 根本不存在，用户传进去就是构造期 `TypeError`；`pop()` 只是让校验表与签名保持一致（继承来的约束键若留着，反而会与 `_parameter_constraints` 的声明式校验自相矛盾）。默认 `penalty=None` 只是「不加正则」，但 `alpha=0.0001` / `l1_ratio=0.15` 仍留在签名里，形成「有参数、默认无效」的错位。
 - **实测点**：
   - `Perceptron(average=True)` → `TypeError: __init__() got an unexpected keyword argument 'average'`；
   - `Perceptron(loss="hinge")` → 同样 TypeError；
@@ -110,12 +131,13 @@
   | `p`（= wᵀx+b） | `y` | Perceptron `py_loss` | Perceptron `py_dloss` | hinge `py_loss` | hinge `py_dloss` |
   |---|---|---|---|---|---|
   | 1.5 | 1 | 0.0 | 0.0 | 0.0 | 0.0 |
+  | **1.0** | **1** | 0.0 | **0.0** | **0.0** | **−1.0** |
   | 0.5 | 1 | 0.0 | **0.0** | 0.5 | **−1.0** |
   | 0.0 | 1 | 0.0 | **−1.0** | 1.0 | −1.0 |
   | −0.5 | 1 | 0.5 | −1.0 | 1.5 | −1.0 |
   | 0.5 | −1 | 0.5 | +1.0 | 1.5 | +1.0 |
 
-  → Perceptron 的 `dloss` 在 `z = p·y <= 0` 时非零（`z=0` 也算），hinge 在 `z < 1` 时非零。
+  → Perceptron 的 `dloss` 在 `z = p·y <= 0` 时非零（**`z = 0` 也算**），hinge 在 `z <= 1` 时非零（**`z = 1` 也算**，实测 `Hinge(1).py_dloss(1.0, 1.0) == -1.0`；再大一点立刻变 0）。**两个折点都取等号，且折点处 `py_loss = 0` 而 `py_dloss ≠ 0`**——这正是「零初始化时损失为 0 却仍更新」的原因。
 - **实测点**（`X=[[1],[5]]`, `y=[1,0]`, `sample_weight=[1,0]`, `coef_init=0`, `intercept_init=m`）：
 
   | 初始决策值 m | Perceptron（θ=0） | hinge（θ=1） |
@@ -125,6 +147,8 @@
   | −0.5 | 更新（coef=1.0, b=0.5） | 更新（默认 optimal 步长 10.0） |
 
   → 零分界 vs 间隔 1 的差别被一次实验直接看见。**对照注意**：hinge 必须显式设 `penalty=None, eta0=1.0, learning_rate="constant"`，否则默认 `optimal` 会把「步长」也混进结论。
+- **延伸（很值得讲的一段）**：**零初始化时损失已经是 0，为什么还会更新？** `w=0, b=0` ⇒ 每个样本 `z = 0`；查表可知 `Hinge(0)` 在 `z=0` 处 `py_loss = 0` 但 `py_dloss = ∓1`。原因是 `max(0, -z)` 在 `z=0` **不可导**（折点），实现必须挑一个次梯度，而 sklearn 挑的是**非零的那一侧**。后果：零初始化后的第一个 epoch 里**每个样本都会触发一次更新**；这也正是判据写成 `<= 0` 而不是 `< 0` 的原因——零点不可微，实现选了非零次梯度，算法就"必须"在那里动一下。反过来，写成 `< 0` 则首轮 0 次更新、直接"收敛"（P3 已实测）。
+  实测推演：`X=[[1],[2],[3],[4]]`、`y=[1,1,-1,-1]`、`fit_intercept=False`、`max_iter=1` ⇒ 一轮后 `coef_=[-2.0]`（第 1、3 个样本更新，第 2、4 个跳过），与手工推演逐个吻合。
 
 #### P3｜教科书循环可逐元素复现：更新式、遍历顺序、停止时机
 
@@ -132,21 +156,24 @@
 - **做法**：在 `shuffle=False`、`tol=None`、稠密、`penalty=None`、`early_stopping=False` 时，算法退化为「按行顺序遍历、误分类即更新、跑满 `max_iter`」。
 - **为什么不一样**：默认配置下它**不是**教科书循环——每个 epoch 后洗牌、按 loss 下降幅度早停、稀疏输入还有截距衰减（P8）。只有把上述开关全部关掉，才能得到可逐元素对照的版本。
 - **实测点**：
-  - 200 样本非可分数据（`cluster_std=2.0`），手工 `if y*(x@w+b) <= 0: w += y*x; b += y` 与 sklearn 的 `coef_` / `intercept_` **完全一致**；
-  - 手工循环共 14526 次更新，而 sklearn `n_iter_=1000`、`t_=200001`（再次说明 `t_` 不是更新次数，见 P4）；
-  - 60 样本默认 `tol=1e-3` 只跑 15 轮。
-  - **边界已确认**：决策值恰好为 0 时**会更新**（`y·f(x) <= 0`，不是 `< 0`）。用 `X=[[0],[0]]`、`y=[1,0]`、`sample_weight=[1,0]`、`coef_init=0`、`intercept_init=0` 构造：Perceptron 的 `intercept_` 从 0 变为 1；把手工循环写成 `< 0` 则与 sklearn 结果不一致，写成 `<= 0` 才逐元素一致。
+  - 数据：`make_blobs(n_samples=200, centers=2, random_state=7, cluster_std=2.0)` **再追加 2 组矛盾样本对**（同特征、相反标签）以保证**严格线性不可分**——光靠 `make_blobs` 的重叠区不能证明不可分；
+  - 手工 `if y*(x@w+b) <= 0: w += y*x; b += y` 与 sklearn 的 `coef_` / `intercept_` **数值近似一致（`np.allclose`，不是逐位相等）**；
+  - 手工循环共 18583 次更新，而 sklearn `n_iter_=1000`、`t_=204001`（再次说明 `t_` 不是更新次数，见 P4）；
+  - **判据的等号**：把手工循环改成 `< 0`，**首轮 0 次更新、1 个 epoch 就退出**（零初始化下 `z` 全为 0，`<` 无一命中），与 sklearn 不一致；写成 `<= 0` 才一致；
+  - **单样本边界**：`X=[[0],[0]]`、`y=[1,0]`、`sample_weight=[1,0]`、`coef_init=0`、`intercept_init=0` → Perceptron 的 `intercept_` 从 0 变为 1，确认「决策值恰为 0 也更新」；
+  - 60 样本默认 `tol=1e-3` 只跑 `n_iter_=7`。
 
-#### P4｜`t_` 的 docstring 在撒谎：它数的是样本，不是权重更新次数
+#### P4｜文档里的「更新次数」应该怎么理解：`t_` 是按「轮数 × 输入样本数」维护的计数
 
-- **位置**：`_perceptron.py` L137–139（属性文档）；`_stochastic_gradient.py` L692（`fit` 重置 `t_=1.0`）、L740 / L800（`t_ += n_iter_ * n_samples`）、L623–624（`partial_fit` 首次置 1.0）。
-- **做法**：`fit` 每次把 `t_` 重置为 1.0，训练结束后按「轮数 × 样本数」累加；`partial_fit` 不重置，跨调用继续累加。
-- **为什么不一样**：docstring 写「Number of weight updates performed during training. Same as `(n_iter_ * n_samples + 1)`」——后半句自己就暴露了它是**样本数公式**，与「更新次数」矛盾。实测非可分数据上 200001 个样本处理只对应 14526 次真正更新。
+- **位置**：`_perceptron.py` L137–139（属性文档）；`_stochastic_gradient.py` L692（`fit` 重置 `t_=1.0`）、L740 / L800（`t_ += n_iter_ * X.shape[0]`）、L623–624（`partial_fit` 首次置 1.0）。
+- **做法**：`fit` 每次把 `t_` 重置为 1.0，训练结束后按「轮数 × **完整输入样本数**」累加；`partial_fit` 不重置，跨调用继续累加。
+- **为什么不一样**：docstring 写「Number of weight updates performed during training. Same as `(n_iter_ * n_samples + 1)`」。这句话不能按字面读，**但「处理样本数 + 1」也不是普遍精确的解释**：`t_` 是**按迭代轮数和输入样本数维护的计数属性**，只有在「单次 `fit` + 二分类」时才恰好等于那个公式；多分类时用的是各 OvA `n_iter_` 的**最大值**，早停时用的仍是**完整样本数**（验证集那部分照算）。稳妥表述：**`t_` 不能直接解释为参数实际改变的次数。**
 - **实测点**：
   - 901 = 15 × 60 + 1（二分类）；
-  - 39535 = 22 × 1797 + 1（digits 多分类）；
-  - 601 = 6 × 100 + 1（`early_stopping=True`）；
-  - `partial_fit` 两次：`t_` 101 → 201，`n_iter_` 恒为 1（`max_iter` 被固定为 1）；
+  - 39535 = 22 × 1797 + 1（digits 多分类，22 是各二分类的最大轮数）；
+  - **1321 = 11 × 120 + 1**（`early_stopping=True`，外层仍用完整的 120 个样本）；
+  - P3 的非可分实验：`t_=204001` vs 实际更新 **18583** 次；
+  - `partial_fit` 两次：`t_` 61 → 121，`n_iter_` 恒为 1（`max_iter` 被固定为 1）；
   - `warm_start=True` 也照样在 `fit` 开头重置 `t_`。
 
 #### P5｜多分类 = OvA + joblib：`n_jobs` 只在多分类生效，`n_iter_` 取最大值
@@ -158,20 +185,22 @@
 
 ### 扩展（选做，P6–P8）
 
-#### P6｜`tol` 比较的是每个 epoch 的训练 loss，不是权重变化；`tol=None` 静默跑满 `max_iter`
+#### P6｜`tol` 与**历史最优** loss 比较，连续 `n_iter_no_change` 轮不改善才停；`tol=None` 静默跑满 `max_iter`
 
-- **位置**：docstring `_perceptron.py` L42–46；`_stochastic_gradient.py` L450（`tol=None` → `-inf`）、L708–720（警告条件）。
-- **做法**：内循环每个 epoch 维护一个 loss 标量，若 `loss > previous_loss - tol` 就停；`tol=None` 时阈值变成 `-inf`，等于永不早停。
-- **为什么不一样**：课堂上「收敛」通常指「不再误分类 / 权重不再变」；这里是**训练损失的下降幅度小于 tol**。非可分数据上 loss 可能长期缓慢下降，于是出现「还在误分类但已经停止」的情况。
-- **实测点**：`tol=None, max_iter=3` 无任何警告；`tol=1e-3, max_iter=3` 报 `ConvergenceWarning`（仅在 `n_iter_ == max_iter` 时触发）。
+- **位置**：docstring `_perceptron.py` L42–46；`_stochastic_gradient.py` L450（`tol=None` → `-inf`）、L994–1002（`tol` 的 docstring 原文）、L708–720（警告条件）、L466–467（`n_iter_no_change` 传入 C）。
+- **做法**：判据**不是「本轮的 loss 与上一轮比」**，而是与**历史最优损失**比。源码 docstring 原文：*training will stop when `(loss > best_loss - tol)` for `n_iter_no_change` consecutive epochs.* 即「连续 `n_iter_no_change` 轮（默认 5）都没把历史最优 loss 压低超过 `tol`，才停」。`tol=None` 时阈值被换成 `-inf`，上式永不成立，等于永不早停。
+- **为什么不一样**：课堂上「收敛」通常指「不再误分类 / 权重不再变」；这里是**训练损失相对历史最优的改善幅度**，而且带「耐心计数」。非可分数据上 loss 可能长期缓慢下降，于是出现「还在误分类但已经停止」的情况。
+- **实测点**：
+  - `tol=None, max_iter=3` 无任何警告（因 `self.tol is not None` 不成立）；`tol=1e-3, max_iter=3` 报 `ConvergenceWarning`（仅在 `n_iter_ == max_iter` 时触发）；
+  - 扫耐心计数，`n_iter_no_change = 1 / 5 / 20 / 100` → `n_iter_ = 2 / 11 / 45 / 234`，严格单调递增，直接证明「连续多轮不改善才停」。
 - **注意**：loss 的具体归一化（是否除以样本数）在 C 内循环里，本地不可读；正文只写「每个 epoch 的 loss 标量」，不要断言「平均」或具体公式。
 
-#### P7｜early_stopping：在原始多分类标签上分层切分，所有 OvA 共享同一掩码
+#### P7｜early_stopping：换成监控验证集 score，**与 P6 共用同一套耐心计数**
 
-- **位置**：`_stochastic_gradient.py` L257–310（`StratifiedShuffleSplit`）、L312–324（`_ValidationScoreCallback`）、L763–765（多分类先按原标签切）、L147–148（`partial_fit` 禁用）。
-- **做法**：`early_stopping=True` 时用 `validation_fraction` 做分层切分；切分发生在 OvA 之前，每个二分类器收到同一个 bool 掩码；回调每次把当前 `coef_/intercept_` 塞进克隆估计器，算验证集 `score`；连续 `n_iter_no_change` 轮提升不足 `tol` 就停。
-- **为什么不一样**：它与 P6 是**两套独立机制**——P6 看训练 loss，P7 看验证集准确率；同一份数据可能一个先停、一个后停。`partial_fit` 直接禁止早停。
-- **实测点**：`early_stopping=True` → `n_iter_=6`、`t_=601`；`partial_fit + early_stopping` → `ValueError: early_stopping should be False with partial_fit`。
+- **位置**：`_stochastic_gradient.py` L257–310（`StratifiedShuffleSplit`）、L312–324（`_ValidationScoreCallback`）、L763–765（多分类先按原标签切）、L1060–1065（docstring：验证 score 连续 `n_iter_no_change` 轮提升不足 `tol`）、L147–148（`partial_fit` 禁用）。
+- **做法**：`early_stopping=True` 时用 `validation_fraction` 做分层切分；切分发生在 OvA 之前，每个二分类器收到同一个 bool 掩码；回调每次把当前 `coef_/intercept_` 塞进克隆估计器，算验证集 `score`；判据是「验证 score 连续 `n_iter_no_change` 轮提升不足 `tol`」。
+- **为什么不一样**：它和 P6 **不是两套独立机制，而是同一套耐心计数、只是换了监控指标**——P6 看训练 loss（越小越好），P7 看验证集 score（越大越好）。同一份数据上两者的停止轮数可以不同（实测 `n_iter_no_change=20` 分别是 45 与 26）。`partial_fit` 直接禁止早停。
+- **实测点**：`early_stopping=True` → `n_iter_=11`、`t_=1321`（= 11 × 120 + 1，外层用完整样本数）；`partial_fit + early_stopping` → `ValueError: early_stopping should be False with partial_fit`。
 
 #### P8｜稀疏输入的截距每步只走 1%：`SPARSE_INTERCEPT_DECAY=0.01`
 
@@ -192,10 +221,17 @@
 #### P9｜`class_weight` 不是重采样，而是把权重乘进 C 循环
 
 - **位置**：`_stochastic_gradient.py` L603–606（`compute_class_weight`）、L432–434 与 L474–475（`pos_weight` / `neg_weight` 入 C）；`fit` docstring L894–898（`sample_weight` 会与 `class_weight` 相乘）。
-- **做法**：`class_weight="balanced"` 只算出每类一个标量权重；二分类把正、负类权重分别作为 `pos_weight` / `neg_weight` 传入内循环，多分类则每个 OvA job 用「本类权重 + 1.0」。数据不复制、不改行数。
-- **为什么不一样**：教科书的「加权」常被理解成过采样 / 重采样；这里是**损失项的乘性权重**，与 `sample_weight` 叠加。而且它与「复制少数类样本」**并不等价**：重采样只能取整数倍，`balanced` 给出的是分数权重，两者权重比例都凑不齐；复制样本还会改变每轮样本数与遍历顺序。
-- **实测点**（300 样本、85:15 不平衡）：`balanced` 的权重比为 1:5.25；`coef=[8.829, -5.29]`、训练 score 0.720；复制少数类 4 份（比例 1:6）得到 `coef=[4.621, -1.961]`、score 0.843，两者 `coef_` 不同。`class_weight="balanced" + partial_fit` → `ValueError: class_weight 'balanced' is not supported for partial_fit...`。
-- **待补**：notebook 里可再补一条曲线，说明「权重比例相同也未必同解」；现有结论已足够支撑「不是重采样」。
+- **做法**：`class_weight="balanced"` 只算出每类一个标量权重；二分类把正、负类权重分别作为 `pos_weight` / `neg_weight` 传入内循环，多分类则每个 OvA job 用「本类权重 + 1.0」。数据不复制、不改行数。权重是**乘性**的：实测把所有样本的 `sample_weight` 乘 2，`coef_` 也精确翻倍（比值 `[2.0, 2.0]`）。
+- **为什么不一样**（**理由已修正**）：教科书的「加权」常被理解成过采样 / 重采样；这里是**损失项的乘性权重**。它与「复制少数类样本」**不等价**，但理由**不是**「权重比例凑不齐」——比例其实凑得齐：`balanced` 权重比 5.25 = 21/4，把**多数类复制 4 份、少数类复制 21 份**（252×4 = 48×21 = 1008），两类「总权重质量」与比例就完全对齐了。真正的区别在**在线训练**：
+  - `balanced` 放大的是**单次更新的幅度**（0.5952 / 3.125 的乘性系数），一次更新仍算一步；
+  - 复制改变的是**访问次数与遍历顺序**（每个 epoch 样本数不同、洗牌后排列不同），一次更新只算一步。
+  感知机每步都在改 `w`，后续样本的判定依赖当前 `w`，所以「放大一次更新」与「重复访问样本」不会走出同一条轨迹。
+- **实测点**（300 样本、85:15 不平衡，`max_iter=200, tol=None`）：
+  - 类别样本数 `[252, 48]`，`balanced` 权重 `[0.5952, 3.125]`（比例 1 : 5.25）；
+  - `class_weight="balanced"`：`coef=[8.829, -5.29]`、训练 score **0.720**；
+  - 复制「多数×4 / 少数×21」（两类各 1008 个样本，比例 1 : 5.25）：`coef=[1.506, -1.128]`、训练 score **0.813**；
+  - 两者 `coef_` 不同（`np.allclose` 为 False），且**比值 `[0.171, 0.213]` 不是常数**——连等比缩放都不成立，说明轨迹形状本身就不同。
+  - `class_weight="balanced" + partial_fit` → `ValueError: class_weight 'balanced' is not supported for partial_fit...`。
 
 #### P10｜没有 `predict_proba`：只有 `decision_function` 的符号 / argmax
 
@@ -224,7 +260,7 @@
 
 ## 取舍
 
-- **主线（必做）**：**P1–P5**。这五条构成完整叙事——「预设档位 → 损失只是 Hinge(0) → 可复现的教科书循环 → 文档撒谎的 `t_` → 多分类 OvA」。
+- **主线（必做）**：**P1–P5**。这五条构成完整叙事——「预设档位 → 损失只是 Hinge(0) → 可复现的教科书循环 → `t_` 的真实语义 → 多分类 OvA」。
 - **扩展（选做）**：**P6–P8**。停止条件、早停、稀疏截距衰减；其中 P8 与 hw4 有重叠，按需取用。
 - **选读**：**P9–P10**。`class_weight` 与 API 边界，适合收尾。
 - **不做**：
@@ -232,24 +268,27 @@
   - 感知机收敛性证明、线性可分性定理；
   - Cython 内循环的源码引用（本地无 `.pyx`）；
   - 重复 hw4 已写的 SGD 配置台 / Dataset 抽象 / ASGD / 学习率表；
-  - 新建 notebook / HTML、改 README、提交 git。
+  - 改 README、提交 git。
 
 ---
 
-## 待确认：若后续做 notebook 的结构（未获确认，不执行）
+## 已交付 notebook 的结构（28 cell / 14 code）
 
-| # | 节标题 | 覆盖 | code cell 做什么 |
-|---|---|---|---|
-| 1 | 定位：221 行里只有 53 行实现 | — | 打印版本/路径；统计 `_perceptron.py` 的 docstring 与代码行数；列出 `linear_model/` 的 `.py` 与 `.so` |
-| 2 | 减法 API：`Perceptron` 是预设档位 | P1 | dump `_parameter_constraints` 与 `__init__`；实测 `average=` / `loss=` 的 TypeError，`eta0=0` 构造通过但 fit 报错，`alpha=-1` 构造即报错 |
-| 3 | 损失表：`Hinge(θ=0)` vs `Hinge(θ=1)` | P2 | 打印 `loss_functions`；三点探针（m=0.5 / 2.0 / −0.5）对比是否更新；说明 `cdef` 方法不可调用 |
-| 4 | 教科书循环复现 | P3 | 手工 numpy 循环 vs sklearn（`shuffle=False, tol=None`）；逐步对比 `coef_/intercept_`；单样本确认 0 边界 |
-| 5 | `t_` / `n_iter_` / `partial_fit` | P4 | 打印 901 / 39535 / 601；`partial_fit` 两次观察 101→201；`warm_start` 下 `t_` 重置 |
-| 6 | 多分类 OvA 与 `n_jobs` | P5 | digits 上打印形状与 `n_iter_`；`n_jobs=1` vs `-1` 的耗时/结果对照（结果应一致） |
-| 7 | 停止条件与早停 | P6/P7 | `tol=None` vs `tol=1e-3` 的警告；`early_stopping` 曲线；`partial_fit` 禁用报错 |
-| 8 | 稀疏截距衰减 | P8 | 同一数据 dense vs csr，打印 `intercept_` 3.0 vs 0.14 与 `coef_` 差异 |
-| 9 | 权重与 API 边界 | P9/P10 | `class_weight="balanced"` vs 复制少数类；`predict_proba` 缺失、`decision_function` 形状 |
-| 10 | 小结 | — | 串成一句：**感知机 = SGD 的一个锁死档位 + Hinge(0)**；所有「不一样」都来自基类开关的默认值 |
+| # | 节标题 | 覆盖 |
+|---|---|---|
+| 1 | 感知机（教科书版 vs 文件/类体行数） | — |
+| 2 | 实现全貌：一次 `fit` 的调用链 | 前置图 |
+| 3 | 定位源码：文件 221 行，类体 213 行 | — |
+| 4 | P1｜减法 API：签名里没有 `loss` 与 `average` | P1 |
+| 5 | P2｜「感知机损失」就是 `Hinge(θ=0)`（含 `z=1` 行） | P2 |
+| 5+ | 延伸：零初始化时损失为 0 为什么还更新 | P2/P3 |
+| 6 | P3｜教科书循环可逐元素复现（矛盾对保证不可分） | P3 |
+| 7 | P4｜文档里的「更新次数」应该怎么理解 | P4 |
+| 8 | P5｜多分类 = OvA + joblib | P5 |
+| 9 | P6 / P7｜同一套耐心机制，监控指标不同 | P6/P7 |
+| 10 | P8｜稀疏输入的截距每步只走 1% | P8 |
+| 11 | P9 / P10｜权重不等价于重采样；感知机没有概率 | P9/P10 |
+| 12 | 小结 | — |
 
 代码要求（沿用 hw1–hw4 惯例）：
 - 用 `inspect.getsource(...)` 取源码，不写死行号；print 前用注释标出 markdown 引用的关键行段；
@@ -261,18 +300,18 @@
 
 ## Assumptions & Decisions
 
-1. **交付形式**（用户已选）：只出方向清单，不产出 notebook / HTML。
+1. **交付形式**：先出方向清单；用户确认后已产出 notebook + HTML（28 cell / 14 code）。
 2. **覆盖范围**（用户已选）：只讲 `Perceptron` 本身；PA、hinge-SVM 只作为 P2 的对照，不单列主线。
 3. **版本**：vmunet 为 sklearn **1.3.2**，与 hw1–hw4 一致；本文行号与结论均在该版本下验证。
 4. **源码不可见部分**：`_sgd_fast` 本地只有 `.so`；`.pxd` 仅 26 行且不含 `Hinge` 声明。P2/P3/P4/P6 的内循环结论**以行为实测为准**，文中不得出现「源码第 N 行写了更新式」这类表述。
 5. **与 hw4 的关系**：P8 与 hw4 R13 同源、P4 与 hw4 R10 部分重叠；已在上表给出「去重说明」。
-6. **不做代码改动**：本文唯一写入是方向清单 markdown。
+6. **代码改动范围**：本清单 markdown + `homework5-Perceptron.ipynb/.html`；README 未改。
 
 ---
 
 ## Verification
 
-1. 本文每条 P# 都含：源码位置、与课堂/教科书的差异、可执行的实测方法；无「待补充」占位（P9 的对照实验明确标为 notebook 待补）。
+1. 本文每条 P# 都含：源码位置、与课堂/教科书的差异、可执行的实测方法；无「待补充」占位（P9 的对照实验已完成，见下方数字）。
 2. 文中数字与下列实测一致（可重跑复核）：
 
 ```bash
@@ -347,4 +386,4 @@ PY
 - **Cython 黑盒**：P2 的阈值语义、P6 的 loss 判定都靠实验反推；文中已标明「行为证据，不是源码引用」。
 - **P3 的可复现条件很窄**：`shuffle=False` + `tol=None` + 稠密 + 无 penalty + 无 early_stopping；缺一不可，正文已列全。
 - **P8 与 hw4 重复风险**：只保留感知机上的后果，机制一句带过并指向 hw4。
-- **P9 的「复制样本 vs balanced」**：尚未实测，本文只给方向与预期（近似等价、非恒等），不作为已验证结论。
+- **P9 的「复制样本 vs balanced」**：已实测，结论是「**不等价**」而非「近似等价」。理由**不是**权重比例凑不齐（5.25 = 21/4，多数类×4、少数类×21 即可对齐），而是**在线训练中「放大单次更新幅度」≠「重复访问样本」**；两组的 `coef` 比值 `[0.171, 0.213]` 不是常数，可直接作为证据。
