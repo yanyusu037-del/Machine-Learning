@@ -7538,7 +7538,7 @@ a.anchor-link {
 <p><strong>主线</strong>：只讲 <code>linear_model.Perceptron</code>；PassiveAggressive 与 hinge-SVM 仅作对照，不展开。</p>
 </blockquote>
 <p>环境：<code>scikit-learn 1.3.2</code> / Python 3.8。文中行号均以 <strong>1.3.2</strong> 版本的库为准。</p>
-<p>一句话贯穿全篇：<strong>sklearn 的 <code>Perceptron</code> 类没有单独实现训练循环，而是复用 <code>BaseSGDClassifier</code> 的 SGD 框架——它做的只是锁死一组默认值，并在损失表里选中 <code>Hinge(θ=0)</code> 这一行。</strong></p>
+<p><strong>sklearn 的 <code>Perceptron</code> 类没有单独实现训练循环，而是复用 <code>BaseSGDClassifier</code> 的 SGD 框架——它做的只是锁死一组默认值，并在损失表里选中 <code>Hinge(θ=0)</code> 这一行。</strong></p>
 </div>
 </div>
 </div>
@@ -7549,10 +7549,10 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="1.-%E6%84%9F%E7%9F%A5%E6%9C%BA">1. 感知机<a class="anchor-link" href="#1.-%E6%84%9F%E7%9F%A5%E6%9C%BA">¶</a></h2><p>教科书版：对每个样本 $(x_i, y_i)$，$y_i \in \{-1,+1\}$，若 $y_i(w^\top x_i + b) \le 0$ 就更新</p>
+<h2 id="1.-%E6%84%9F%E7%9F%A5%E6%9C%BA">1. 感知机<a class="anchor-link" href="#1.-%E6%84%9F%E7%9F%A5%E6%9C%BA">¶</a></h2><p>对每个样本 $(x_i, y_i)$，$y_i \in \{-1,+1\}$，若 $y_i(w^\top x_i + b) \le 0$ 就更新</p>
 <p>$$w \leftarrow w + \eta\, y_i x_i,\qquad b \leftarrow b + \eta\, y_i$$</p>
-<p>课堂印象里的感知机：误分类驱动、无正则、不加权、没有概率输出、线性可分时才保证收敛。</p>
-<p>而 <code>sklearn/linear_model/_perceptron.py</code> <strong>整个文件只有 221 行</strong>；其中 <code>Perceptron</code> <strong>类体占 213 行</strong>（L9–L221），类体里 docstring 又占 158 行——<strong>真正的类体代码只剩 55 行</strong>（这 55 行不含文件顶部的 8 行 import）。它做的事只有两件：<strong>裁剪参数</strong> + <strong>委托基类</strong>。本作业先看整体调用链，再按 P1–P10 逐条拆开。</p>
+<p>理论上，感知机由误分类驱动、无正则、不加权、没有概率输出、只有在线性可分时才保证收敛。</p>
+<p><code>sklearn/linear_model/_perceptron.py</code> <strong>整个文件只有 221 行</strong>；其中 <code>Perceptron</code> <strong>类体占 213 行</strong>（L9–L221），类体里 docstring 又占 158 行——<strong>真正的类体代码只剩 55 行</strong>（这 55 行不含文件顶部的 8 行 import）。它只裁剪参数，并委托基类。我们先看整体调用链，再按逐条拆开。</p>
 </div>
 </div>
 </div>
@@ -7563,7 +7563,7 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="2.-%E5%AE%9E%E7%8E%B0%E5%85%A8%E8%B2%8C%EF%BC%9A%E4%B8%80%E6%AC%A1-fit-%E7%9A%84%E8%B0%83%E7%94%A8%E9%93%BE">2. 实现全貌：一次 <code>fit</code> 的调用链<a class="anchor-link" href="#2.-%E5%AE%9E%E7%8E%B0%E5%85%A8%E8%B2%8C%EF%BC%9A%E4%B8%80%E6%AC%A1-fit-%E7%9A%84%E8%B0%83%E7%94%A8%E9%93%BE">¶</a></h2><p><code>Perceptron</code> 自己不写 <code>fit</code>（<code>"fit" in Perceptron.__dict__</code> 为 <code>False</code>）。继承来的每一步都指向基类，训练循环一路下沉到 Cython：</p>
+<h2 id="2.-%E5%AE%9E%E7%8E%B0%E5%85%A8%E8%B2%8C%EF%BC%9A%E4%B8%80%E6%AC%A1-fit-%E7%9A%84%E8%B0%83%E7%94%A8%E9%93%BE">2. 实现全貌：一次 <code>fit</code> 的调用链<a class="anchor-link" href="#2.-%E5%AE%9E%E7%8E%B0%E5%85%A8%E8%B2%8C%EF%BC%9A%E4%B8%80%E6%AC%A1-fit-%E7%9A%84%E8%B0%83%E7%94%A8%E9%93%BE">¶</a></h2><p><code>Perceptron</code> 的继承链如下：</p>
 <pre><code>Perceptron.fit                        # 继承 BaseSGDClassifier.fit（L877，被 @_fit_context 装饰）
   → BaseSGDClassifier._fit            # L655：重置 t_、处理 warm_start、再交给 _partial_fit
   → BaseSGDClassifier._partial_fit    # L571：算 class_weight，按类别数分流
@@ -7571,15 +7571,14 @@ a.anchor-link {
     / BaseSGDClassifier._fit_multiclass  # L757：多分类，joblib 并行
   → fit_binary                        # L359：准备数据集、解析随机种子
   → _plain_sgd64 / _plain_sgd32       # Cython `_sgd_fast`（.so）
-  → Hinge.dloss                       # 就在 Cython 里逐样本调用
+  → Hinge.dloss                       # 在 Cython 里逐样本调用
 </code></pre>
-<p>三个要点先记住，后面 P1–P10 都在解释它们：</p>
 <ol>
 <li><strong>降级为「一行配置」</strong>：<code>Perceptron</code> 只提供了 <code>loss="perceptron"</code> 这一项，其余全在基类；</li>
 <li><strong>两条分叉</strong>：二分类走 <code>_fit_binary</code>，多分类走 <code>_fit_multiclass</code>（OvA + joblib）；</li>
 <li><strong>真正的循环在编译模块里</strong>：<code>_sgd_fast</code> 是 <code>.so</code>，只有 <code>Hinge</code> 这个损失对象可以用 <code>py_loss</code> / <code>py_dloss</code> 从 Python 侧读到判据。</li>
 </ol>
-<p><code>fit</code> 上挂的 <code>@_fit_context</code> 装饰器，正是 P1 里「越界参数要到 <code>fit</code> 期才报错」的原因。</p>
+<p><code>fit</code> 上挂的 <code>@_fit_context</code> 装饰器，导致「越界参数要到 <code>fit</code> 期才报错」。</p>
 </div>
 </div>
 </div>
@@ -7604,7 +7603,7 @@ a.anchor-link {
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">line_of</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">start</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">"""在给定源码片段里找出 `def name` 的行号（用文本扫描，不依赖装饰器）。"""</span>
+<span class="w">    </span><span class="sd">"""找出 `def name` 的行号"""</span>
     <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">source</span><span class="p">):</span>
         <span class="k">if</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">"\s*def </span><span class="si">%s</span><span class="s2">\b"</span> <span class="o">%</span> <span class="n">name</span><span class="p">,</span> <span class="n">l</span><span class="p">):</span>
             <span class="k">return</span> <span class="n">start</span> <span class="o">+</span> <span class="n">i</span>
@@ -7625,9 +7624,9 @@ a.anchor-link {
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%-35s</span><span class="s2"> L</span><span class="si">%d</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="s2">"fit_binary"</span><span class="p">,</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getsourcelines</span><span class="p">(</span><span class="n">fit_binary</span><span class="p">)[</span><span class="mi">1</span><span class="p">]))</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%-35s</span><span class="s2"> L</span><span class="si">%d</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="s2">"_get_plain_sgd_function"</span><span class="p">,</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getsourcelines</span><span class="p">(</span><span class="n">_get_plain_sgd_function</span><span class="p">)[</span><span class="mi">1</span><span class="p">]))</span>
 <span class="nb">print</span><span class="p">()</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  float64 走哪个内核 :"</span><span class="p">,</span> <span class="n">_get_plain_sgd_function</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">"float64"</span><span class="p">))</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  float32 走哪个内核 :"</span><span class="p">,</span> <span class="n">_get_plain_sgd_function</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">"float32"</span><span class="p">))</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  训练循环本体所在   :"</span><span class="p">,</span> <span class="n">_get_plain_sgd_function</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">"float64"</span><span class="p">))</span><span class="o">.</span><span class="vm">__module__</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  float64:"</span><span class="p">,</span> <span class="n">_get_plain_sgd_function</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">"float64"</span><span class="p">))</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  float32:"</span><span class="p">,</span> <span class="n">_get_plain_sgd_function</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">"float32"</span><span class="p">))</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  训练循环:"</span><span class="p">,</span> <span class="n">_get_plain_sgd_function</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">"float64"</span><span class="p">))</span><span class="o">.</span><span class="vm">__module__</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -7654,9 +7653,9 @@ a.anchor-link {
   fit_binary                          L359
   _get_plain_sgd_function             L494
 
-  float64 走哪个内核 : _plain_sgd64
-  float32 走哪个内核 : _plain_sgd32
-  训练循环本体所在   : sklearn.linear_model._sgd_fast
+  float64: _plain_sgd64
+  float32: _plain_sgd32
+  训练循环: sklearn.linear_model._sgd_fast
 </pre>
 </div>
 </div>
@@ -7669,8 +7668,8 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="3.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9A%E6%96%87%E4%BB%B6-221-%E8%A1%8C%EF%BC%8C%E7%B1%BB%E4%BD%93-213-%E8%A1%8C">3. 定位源码：文件 221 行，类体 213 行<a class="anchor-link" href="#3.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9A%E6%96%87%E4%BB%B6-221-%E8%A1%8C%EF%BC%8C%E7%B1%BB%E4%BD%93-213-%E8%A1%8C">¶</a></h2><p><code>Perceptron</code> 的全部实现都在 <code>sklearn/linear_model/_perceptron.py</code>，它不新增任何训练逻辑：改参数约束表、写死几个默认值，然后调用 <code>BaseSGDClassifier</code>。</p>
-<p>行数要分两把尺子量：<strong>文件 221 行</strong>，其中<strong>类体 213 行</strong>（L9–L221）；类体里 docstring 158 行，剩下的 55 行才是实现（不含文件顶部的 import）。</p>
+<h2 id="3.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9A%E6%96%87%E4%BB%B6-221-%E8%A1%8C%EF%BC%8C%E7%B1%BB%E4%BD%93-213-%E8%A1%8C">3. 定位源码：文件 221 行，类体 213 行<a class="anchor-link" href="#3.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9A%E6%96%87%E4%BB%B6-221-%E8%A1%8C%EF%BC%8C%E7%B1%BB%E4%BD%93-213-%E8%A1%8C">¶</a></h2><p><code>Perceptron</code> 的全部实现都在 <code>sklearn/linear_model/_perceptron.py</code>，其中不新增任何训练逻辑：改参数约束表、写默认值，然后调用 <code>BaseSGDClassifier</code>。</p>
+<p><strong>文件 221 行</strong>，其中<strong>类体 213 行</strong>（L9–L221）；类体里 docstring 158 行，剩下的 55 行才是实现。</p>
 <p><code>linear_model/</code> 目录下的 <code>.py</code> 都可 <code>inspect.getsource</code>；<code>.so</code> 只有二进制；<code>.pxd</code> 只是给 <code>_sag_fast</code> 用的声明，<strong>不含 Hinge</strong>。</p>
 </div>
 </div>
@@ -7758,13 +7757,13 @@ Cython 声明  (1): _sgd_fast.pxd
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="4.-P1%EF%BD%9C%E5%87%8F%E6%B3%95-API%EF%BC%9A%E7%AD%BE%E5%90%8D%E9%87%8C%E6%B2%A1%E6%9C%89-loss-%E4%B8%8E-average%EF%BC%8C%E5%86%8D%E5%86%99%E6%AD%BB%E5%9B%9B%E4%B8%AA%E9%BB%98%E8%AE%A4%E5%80%BC">4. P1｜减法 API：签名里没有 <code>loss</code> 与 <code>average</code>，再写死四个默认值<a class="anchor-link" href="#4.-P1%EF%BD%9C%E5%87%8F%E6%B3%95-API%EF%BC%9A%E7%AD%BE%E5%90%8D%E9%87%8C%E6%B2%A1%E6%9C%89-loss-%E4%B8%8E-average%EF%BC%8C%E5%86%8D%E5%86%99%E6%AD%BB%E5%9B%9B%E4%B8%AA%E9%BB%98%E8%AE%A4%E5%80%BC">¶</a></h2><p><code>Perceptron</code> 不是「另写一遍感知机」，而是把 <code>BaseSGDClassifier</code> 的能力<strong>裁剪</strong>成一个固定档位：</p>
+<h2 id="4.-%E5%87%8F%E6%B3%95-API%EF%BC%9A%E7%AD%BE%E5%90%8D%E9%87%8C%E6%B2%A1%E6%9C%89-loss-%E4%B8%8E-average%EF%BC%8C%E5%86%8D%E5%86%99%E6%AD%BB%E5%9B%9B%E4%B8%AA%E9%BB%98%E8%AE%A4%E5%80%BC">4. 减法 API：签名里没有 <code>loss</code> 与 <code>average</code>，再写死四个默认值<a class="anchor-link" href="#4.-%E5%87%8F%E6%B3%95-API%EF%BC%9A%E7%AD%BE%E5%90%8D%E9%87%8C%E6%B2%A1%E6%9C%89-loss-%E4%B8%8E-average%EF%BC%8C%E5%86%8D%E5%86%99%E6%AD%BB%E5%9B%9B%E4%B8%AA%E9%BB%98%E8%AE%A4%E5%80%BC">¶</a></h2><p><code>Perceptron</code> 不是「另写一遍感知机」，而是把 <code>BaseSGDClassifier</code> 的能力<strong>退化</strong>：</p>
 <ul>
 <li>「用户不能改损失、不能开权重平均（ASGD）」的<strong>直接原因</strong>是<strong>构造函数签名里根本没有 <code>loss</code> 和 <code>average</code> 这两个形参</strong>（传入即构造期 <code>TypeError</code>）；同时 <code>Perceptron.__init__</code> 硬编码了 <code>loss="perceptron"</code>、<code>learning_rate="constant"</code>、<code>eta0=1.0</code>、<code>power_t=0.5</code>；</li>
 <li>类体里的 <code>_parameter_constraints.pop("loss")</code> / <code>.pop("average")</code> <strong>只是移除这两个键对应的参数校验约束</strong>（它们继承自 <code>BaseSGDClassifier</code>，既然签名里没有，就不该再校验）——它本身不阻止任何调用，也不是"禁止"的原因。</li>
 </ul>
 <p>这样 <code>Perceptron()</code> 就等价于 <code>SGDClassifier(loss="perceptron", eta0=1, learning_rate="constant", penalty=None)</code>（<code>np.allclose</code> 意义下的数值近似一致，不是逐位相等）。</p>
-<p>还有一个容易踩的坑：<strong>参数校验时机不一致</strong>。<code>loss</code> / <code>average</code> 因为根本不在签名里，是<strong>构造期</strong> <code>TypeError</code>；而 <code>eta0=0</code> / <code>alpha=-1</code> 这类越界值是<strong>构造通过、<code>fit</code> 期才报错</strong>（sklearn 1.3 的参数校验挂在 <code>fit</code> 的装饰器上）。先看源码，再实测。</p>
+<p><strong>参数校验时机不一致</strong>。<code>loss</code> / <code>average</code> 根本不在签名里，是<strong>构造期</strong> <code>TypeError</code>；而 <code>eta0=0</code> / <code>alpha=-1</code> 这类越界值是<strong>构造通过、<code>fit</code> 期才报错</strong>（sklearn 1.3 的参数校验挂在 <code>fit</code> 的装饰器上）。先看源码，再实测。</p>
 </div>
 </div>
 </div>
@@ -7812,8 +7811,28 @@ Cython 声明  (1): _sgd_fast.pxd
 <span class="nb">print</span><span class="p">(</span><span class="s2">"== 结果 =="</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  'loss' in constraints   :"</span><span class="p">,</span> <span class="s2">"loss"</span> <span class="ow">in</span> <span class="n">c</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  'average' in constraints:"</span><span class="p">,</span> <span class="s2">"average"</span> <span class="ow">in</span> <span class="n">c</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  penalty 允许值          :"</span><span class="p">,</span> <span class="n">c</span><span class="p">[</span><span class="s2">"penalty"</span><span class="p">])</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  eta0 允许范围           :"</span><span class="p">,</span> <span class="n">c</span><span class="p">[</span><span class="s2">"eta0"</span><span class="p">])</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">describe</span><span class="p">(</span><span class="n">cons</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""把 sklearn 的约束对象翻译成可读文本（避免打印出 &lt;... object at 0x...&gt;）。"""</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">con</span> <span class="ow">in</span> <span class="n">cons</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">con</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"None"</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">con</span><span class="p">,</span> <span class="s2">"options"</span><span class="p">):</span>          <span class="c1"># StrOptions</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"{"</span> <span class="o">+</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">repr</span><span class="p">,</span> <span class="n">con</span><span class="o">.</span><span class="n">options</span><span class="p">)))</span> <span class="o">+</span> <span class="s2">"}"</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">con</span><span class="p">,</span> <span class="s2">"left"</span><span class="p">):</span>             <span class="c1"># Interval</span>
+            <span class="n">lo</span> <span class="o">=</span> <span class="s2">"-inf"</span> <span class="k">if</span> <span class="n">con</span><span class="o">.</span><span class="n">left</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">con</span><span class="o">.</span><span class="n">left</span>
+            <span class="n">hi</span> <span class="o">=</span> <span class="s2">"inf"</span> <span class="k">if</span> <span class="n">con</span><span class="o">.</span><span class="n">right</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">con</span><span class="o">.</span><span class="n">right</span>
+            <span class="n">left_br</span> <span class="o">=</span> <span class="s2">"["</span> <span class="k">if</span> <span class="n">con</span><span class="o">.</span><span class="n">closed</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"left"</span><span class="p">,</span> <span class="s2">"both"</span><span class="p">)</span> <span class="k">else</span> <span class="s2">"("</span>
+            <span class="n">right_br</span> <span class="o">=</span> <span class="s2">"]"</span> <span class="k">if</span> <span class="n">con</span><span class="o">.</span><span class="n">closed</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"right"</span><span class="p">,</span> <span class="s2">"both"</span><span class="p">)</span> <span class="k">else</span> <span class="s2">")"</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"</span><span class="si">%s%s</span><span class="s2">, </span><span class="si">%s%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">left_br</span><span class="p">,</span> <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span><span class="p">,</span> <span class="n">right_br</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="n">con</span><span class="p">))</span>
+    <span class="k">return</span> <span class="s2">" 或者 "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  penalty 允许值          :"</span><span class="p">,</span> <span class="n">describe</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">"penalty"</span><span class="p">]))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  eta0 允许范围           :"</span><span class="p">,</span> <span class="n">describe</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">"eta0"</span><span class="p">]))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  alpha 允许范围          :"</span><span class="p">,</span> <span class="n">describe</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">"alpha"</span><span class="p">]))</span>
 </pre></div>
 </div>
 </div>
@@ -7890,8 +7909,9 @@ Cython 声明  (1): _sgd_fast.pxd
 == 结果 ==
   'loss' in constraints   : False
   'average' in constraints: False
-  penalty 允许值          : [&lt;sklearn.utils._param_validation.StrOptions object at 0x76fafc8c34c0&gt;, None]
-  eta0 允许范围           : [&lt;sklearn.utils._param_validation.Interval object at 0x76fafc8c3af0&gt;]
+  penalty 允许值          : {'elasticnet', 'l1', 'l2'} 或者 None
+  eta0 允许范围           : [0, inf)
+  alpha 允许范围          : [0, inf)
 </pre>
 </div>
 </div>
