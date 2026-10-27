@@ -7538,7 +7538,7 @@ a.anchor-link {
 <p><strong>主线</strong>：只讲 <code>linear_model.Perceptron</code>；PassiveAggressive 与 hinge-SVM 仅作对照，不展开。</p>
 </blockquote>
 <p>环境：<code>scikit-learn 1.3.2</code> / Python 3.8。文中行号均以 <strong>1.3.2</strong> 版本的库为准。</p>
-<p><strong>sklearn 的 <code>Perceptron</code> 类没有单独实现训练循环，而是复用 <code>BaseSGDClassifier</code> 的 SGD 框架——它做的只是锁死一组默认值，并在损失表里选中 <code>Hinge(θ=0)</code> 这一行。</strong></p>
+<p><strong>sklearn 的 <code>Perceptron</code> 类没有单独实现训练循环，而是复用 <code>BaseSGDClassifier</code> 的 SGD 框架：固定部分内部参数、设置默认值、缩减公开参数，从而提供感知机接口。</strong></p>
 </div>
 </div>
 </div>
@@ -7549,10 +7549,10 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="1.-%E6%84%9F%E7%9F%A5%E6%9C%BA">1. 感知机<a class="anchor-link" href="#1.-%E6%84%9F%E7%9F%A5%E6%9C%BA">¶</a></h2><p>对每个样本 $(x_i, y_i)$，$y_i \in \{-1,+1\}$，若 $y_i(w^\top x_i + b) \le 0$ 就更新</p>
+<h2 id="1.-%E6%84%9F%E7%9F%A5%E6%9C%BA">1. 感知机<a class="anchor-link" href="#1.-%E6%84%9F%E7%9F%A5%E6%9C%BA">¶</a></h2><p>对每个样本 $(x_i, y_i)$，$y_i \in \{-1,+1\}$。记<strong>决策值</strong> $f(x)=w^\top x + b$，<strong>带符号间隔</strong> $z = y f(x)$；感知机在 $z \le 0$ 时更新</p>
 <p>$$w \leftarrow w + \eta\, y_i x_i,\qquad b \leftarrow b + \eta\, y_i$$</p>
 <p>理论上，感知机由误分类驱动、无正则、不加权、没有概率输出、只有在线性可分时才保证收敛。</p>
-<p><code>sklearn/linear_model/_perceptron.py</code> <strong>整个文件只有 221 行</strong>；其中 <code>Perceptron</code> <strong>类体占 213 行</strong>（L9–L221），类体里 docstring 又占 158 行——<strong>真正的类体代码只剩 55 行</strong>（这 55 行不含文件顶部的 8 行 import）。它只裁剪参数，并委托基类。我们先看整体调用链，再按逐条拆开。</p>
+<p><code>sklearn/linear_model/_perceptron.py</code> <strong>整个文件只有 221 行</strong>；其中 <code>Perceptron</code> <strong>类体占 213 行</strong>（L9–L221），类体里 docstring 又占 158 行——<strong>扣除类文档字符串后还剩 55 行，其中包含空行和注释</strong>（这 55 行不含文件顶部的 8 行 import）。它主要做的是裁剪公开参数并委托基类。我们先看整体调用关系，再逐条拆开。</p>
 </div>
 </div>
 </div>
@@ -7563,22 +7563,31 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="2.-%E5%AE%9E%E7%8E%B0%E5%85%A8%E8%B2%8C%EF%BC%9A%E4%B8%80%E6%AC%A1-fit-%E7%9A%84%E8%B0%83%E7%94%A8%E9%93%BE">2. 实现全貌：一次 <code>fit</code> 的调用链<a class="anchor-link" href="#2.-%E5%AE%9E%E7%8E%B0%E5%85%A8%E8%B2%8C%EF%BC%9A%E4%B8%80%E6%AC%A1-fit-%E7%9A%84%E8%B0%83%E7%94%A8%E9%93%BE">¶</a></h2><p><code>Perceptron</code> 的继承链如下：</p>
-<pre><code>Perceptron.fit                        # 继承 BaseSGDClassifier.fit（L877，被 @_fit_context 装饰）
-  → BaseSGDClassifier._fit            # L655：重置 t_、处理 warm_start、再交给 _partial_fit
-  → BaseSGDClassifier._partial_fit    # L571：算 class_weight，按类别数分流
-  → BaseSGDClassifier._fit_binary     # L723：二分类（也是 OvA 的单个 job）
-    / BaseSGDClassifier._fit_multiclass  # L757：多分类，joblib 并行
-  → fit_binary                        # L359：准备数据集、解析随机种子
-  → _plain_sgd64 / _plain_sgd32       # Cython `_sgd_fast`（.so）
-  → Hinge.dloss                       # 在 Cython 里逐样本调用
-</code></pre>
+<h2 id="2.-%E4%B8%80%E6%AC%A1-fit-%E7%9A%84%E8%B0%83%E7%94%A8%E5%85%B3%E7%B3%BB">2. 一次 <code>fit</code> 的调用关系<a class="anchor-link" href="#2.-%E4%B8%80%E6%AC%A1-fit-%E7%9A%84%E8%B0%83%E7%94%A8%E5%85%B3%E7%B3%BB">¶</a></h2><p><code>Perceptron</code> 中没有定义 <code>fit</code>，调用的是基类的方法。函数调用关系如下：</p>
+<div class="highlight"><pre><span></span>fit → _fit → _partial_fit
+                 ├─ 二分类：_fit_binary → fit_binary
+                 └─ 多分类：_fit_multiclass → 并行调用 fit_binary
+                                              ↓
+                                      _plain_sgd32/64
+                                              ↓
+                                         Hinge.dloss
+</pre></div>
+<p>对应源码说明（<code>_stochastic_gradient.py</code>，行号由 <code>inspect.getsourcelines</code> 取得）：</p>
+<ul>
+<li><code>BaseSGDClassifier.fit</code>：L877，被 <code>@_fit_context</code> 装饰；</li>
+<li><code>_fit</code>：L655，重置 <code>t_</code>、处理 <code>warm_start</code>，再交给 <code>_partial_fit</code>；</li>
+<li><code>_partial_fit</code>：L571，计算 <code>class_weight</code>，按类别数分流；</li>
+<li><code>_fit_binary</code>：L723（二分类）；<code>_fit_multiclass</code>：L757（多分类，joblib 并行）；</li>
+<li>模块级 <code>fit_binary</code>：L359，准备数据集、解析随机种子；</li>
+<li><code>_get_plain_sgd_function</code>：L494，float64 取 <code>_plain_sgd64</code>、float32 取 <code>_plain_sgd32</code>。</li>
+</ul>
+<p>三点概括：</p>
 <ol>
-<li><strong>降级为「一行配置」</strong>：<code>Perceptron</code> 只提供了 <code>loss="perceptron"</code> 这一项，其余全在基类；</li>
-<li><strong>两条分叉</strong>：二分类走 <code>_fit_binary</code>，多分类走 <code>_fit_multiclass</code>（OvA + joblib）；</li>
-<li><strong>真正的循环在编译模块里</strong>：<code>_sgd_fast</code> 是 <code>.so</code>，只有 <code>Hinge</code> 这个损失对象可以用 <code>py_loss</code> / <code>py_dloss</code> 从 Python 侧读到判据。</li>
+<li><strong>公开参数被缩减</strong>：<code>loss</code> 固定为 <code>"perceptron"</code>，其余训练逻辑都在基类；</li>
+<li><strong>两条分叉</strong>：二分类走 <code>_fit_binary</code>，多分类走 <code>_fit_multiclass</code>，后者并行调用模块级的 <code>fit_binary</code>；</li>
+<li><strong>训练循环在编译模块里</strong>：<code>_sgd_fast</code> 是 <code>.so</code>，只有 <code>Hinge</code> 这个损失对象可以用 <code>py_loss</code> / <code>py_dloss</code> 从 Python 侧读到判据。</li>
 </ol>
-<p><code>fit</code> 上挂的 <code>@_fit_context</code> 装饰器，导致「越界参数要到 <code>fit</code> 期才报错」。</p>
+<p><code>fit</code> 上的 <code>@_fit_context</code> 装饰器，导致「越界参数要到 <code>fit</code> 期才报错」。</p>
 </div>
 </div>
 </div>
@@ -7668,8 +7677,8 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="3.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9A%E6%96%87%E4%BB%B6-221-%E8%A1%8C%EF%BC%8C%E7%B1%BB%E4%BD%93-213-%E8%A1%8C">3. 定位源码：文件 221 行，类体 213 行<a class="anchor-link" href="#3.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9A%E6%96%87%E4%BB%B6-221-%E8%A1%8C%EF%BC%8C%E7%B1%BB%E4%BD%93-213-%E8%A1%8C">¶</a></h2><p><code>Perceptron</code> 的全部实现都在 <code>sklearn/linear_model/_perceptron.py</code>，其中不新增任何训练逻辑：改参数约束表、写默认值，然后调用 <code>BaseSGDClassifier</code>。</p>
-<p><strong>文件 221 行</strong>，其中<strong>类体 213 行</strong>（L9–L221）；类体里 docstring 158 行，剩下的 55 行才是实现。</p>
+<h2 id="3.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9A%E6%96%87%E4%BB%B6-221-%E8%A1%8C%EF%BC%8C%E7%B1%BB%E4%BD%93-213-%E8%A1%8C">3. 定位源码：文件 221 行，类体 213 行<a class="anchor-link" href="#3.-%E5%AE%9A%E4%BD%8D%E6%BA%90%E7%A0%81%EF%BC%9A%E6%96%87%E4%BB%B6-221-%E8%A1%8C%EF%BC%8C%E7%B1%BB%E4%BD%93-213-%E8%A1%8C">¶</a></h2><p><code>Perceptron</code> 的全部实现都在 <code>sklearn/linear_model/_perceptron.py</code>，其中不新增训练逻辑：调整参数约束表、设置默认值，然后调用 <code>BaseSGDClassifier</code>。</p>
+<p><strong>文件 221 行</strong>，其中<strong>类体 213 行</strong>（L9–L221）；类体里 docstring 158 行，<strong>扣除类文档字符串后还剩 55 行，其中包含空行和注释</strong>。</p>
 <p><code>linear_model/</code> 目录下的 <code>.py</code> 都可 <code>inspect.getsource</code>；<code>.so</code> 只有二进制；<code>.pxd</code> 只是给 <code>_sag_fast</code> 用的声明，<strong>不含 Hinge</strong>。</p>
 </div>
 </div>
@@ -7757,13 +7766,14 @@ Cython 声明  (1): _sgd_fast.pxd
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="4.-%E5%87%8F%E6%B3%95-API%EF%BC%9A%E7%AD%BE%E5%90%8D%E9%87%8C%E6%B2%A1%E6%9C%89-loss-%E4%B8%8E-average%EF%BC%8C%E5%86%8D%E5%86%99%E6%AD%BB%E5%9B%9B%E4%B8%AA%E9%BB%98%E8%AE%A4%E5%80%BC">4. 减法 API：签名里没有 <code>loss</code> 与 <code>average</code>，再写死四个默认值<a class="anchor-link" href="#4.-%E5%87%8F%E6%B3%95-API%EF%BC%9A%E7%AD%BE%E5%90%8D%E9%87%8C%E6%B2%A1%E6%9C%89-loss-%E4%B8%8E-average%EF%BC%8C%E5%86%8D%E5%86%99%E6%AD%BB%E5%9B%9B%E4%B8%AA%E9%BB%98%E8%AE%A4%E5%80%BC">¶</a></h2><p><code>Perceptron</code> 不是「另写一遍感知机」，而是把 <code>BaseSGDClassifier</code> 的能力<strong>退化</strong>：</p>
+<h2 id="4.-%E5%85%AC%E5%BC%80%E5%8F%82%E6%95%B0%E8%A2%AB%E7%BC%A9%E5%87%8F%EF%BC%9A%E7%AD%BE%E5%90%8D%E9%87%8C%E6%B2%A1%E6%9C%89-loss-%E4%B8%8E-average">4. 公开参数被缩减：签名里没有 <code>loss</code> 与 <code>average</code><a class="anchor-link" href="#4.-%E5%85%AC%E5%BC%80%E5%8F%82%E6%95%B0%E8%A2%AB%E7%BC%A9%E5%87%8F%EF%BC%9A%E7%AD%BE%E5%90%8D%E9%87%8C%E6%B2%A1%E6%9C%89-loss-%E4%B8%8E-average">¶</a></h2><p><code>Perceptron</code> 复用基类的训练实现，通过<strong>固定部分内部参数、设置默认值和缩减公开参数</strong>，提供感知机接口。其中，<code>loss</code> 和 <code>learning_rate</code> 固定，<code>eta0</code> 默认值为 1.0，但允许用户修改。</p>
 <ul>
-<li>「用户不能改损失、不能开权重平均（ASGD）」的<strong>直接原因</strong>是<strong>构造函数签名里根本没有 <code>loss</code> 和 <code>average</code> 这两个形参</strong>（传入即构造期 <code>TypeError</code>）；同时 <code>Perceptron.__init__</code> 硬编码了 <code>loss="perceptron"</code>、<code>learning_rate="constant"</code>、<code>eta0=1.0</code>、<code>power_t=0.5</code>；</li>
-<li>类体里的 <code>_parameter_constraints.pop("loss")</code> / <code>.pop("average")</code> <strong>只是移除这两个键对应的参数校验约束</strong>（它们继承自 <code>BaseSGDClassifier</code>，既然签名里没有，就不该再校验）——它本身不阻止任何调用，也不是"禁止"的原因。</li>
+<li>「用户不能改损失、不能开权重平均（ASGD）」的<strong>直接原因</strong>是<strong>构造函数签名里根本没有 <code>loss</code> 和 <code>average</code> 这两个形参</strong>，传入即构造期 <code>TypeError</code>；</li>
+<li><code>Perceptron.__init__</code> 把 <code>loss="perceptron"</code>、<code>learning_rate="constant"</code> 固定下来，并给 <code>eta0=1.0</code>、<code>power_t=0.5</code> 设置默认值（<code>alpha</code>、<code>penalty</code>、<code>shuffle</code>、<code>tol</code> 等仍可由用户配置）；</li>
+<li>类体里的 <code>_parameter_constraints.pop("loss")</code> / <code>.pop("average")</code> <strong>只是移除这两个键对应的参数校验约束</strong>（它们继承自 <code>BaseSGDClassifier</code>，签名里既然没有，就不该再校验）。</li>
 </ul>
-<p>这样 <code>Perceptron()</code> 就等价于 <code>SGDClassifier(loss="perceptron", eta0=1, learning_rate="constant", penalty=None)</code>（<code>np.allclose</code> 意义下的数值近似一致，不是逐位相等）。</p>
-<p><strong>参数校验时机不一致</strong>。<code>loss</code> / <code>average</code> 根本不在签名里，是<strong>构造期</strong> <code>TypeError</code>；而 <code>eta0=0</code> / <code>alpha=-1</code> 这类越界值是<strong>构造通过、<code>fit</code> 期才报错</strong>（sklearn 1.3 的参数校验挂在 <code>fit</code> 的装饰器上）。先看源码，再实测。</p>
+<p>这样 <code>Perceptron()</code> 与 <code>SGDClassifier(loss="perceptron", eta0=1.0, learning_rate="constant", penalty=None)</code> 在数值近似意义下一致（<code>np.allclose</code>，不是逐位相等）。</p>
+<p><strong>参数校验的时机：</strong><code>loss</code> / <code>average</code> 根本不在签名里，是<strong>构造期</strong> <code>TypeError</code>；而 <code>eta0=0</code> / <code>alpha=-1</code> 这类越界值是<strong>构造通过、<code>fit</code> 期才报错</strong>（sklearn 1.3 的参数校验挂在 <code>fit</code> 的装饰器上）。先看源码，再实测。</p>
 </div>
 </div>
 </div>
@@ -7782,10 +7792,10 @@ Cython 声明  (1): _sgd_fast.pxd
 <span class="n">MARKS</span> <span class="o">=</span> <span class="p">{</span>
     <span class="s1">'self._parameter_constraints.pop("loss")'</span><span class="p">:</span> <span class="s2">"  # &lt;== 只删掉 loss 的校验约束"</span><span class="p">,</span>
     <span class="s1">'self._parameter_constraints.pop("average")'</span><span class="p">:</span> <span class="s2">"  # &lt;== 只删掉 average 的校验约束"</span><span class="p">,</span>
-    <span class="s1">'loss="perceptron",'</span><span class="p">:</span> <span class="s2">"  # &lt;== 锁死损失"</span><span class="p">,</span>
-    <span class="s1">'learning_rate="constant",'</span><span class="p">:</span> <span class="s2">"  # &lt;== 锁死学习率表"</span><span class="p">,</span>
-    <span class="s1">'eta0=1.0,'</span><span class="p">:</span> <span class="s2">"  # &lt;== 默认步长 1.0（签名里可改）"</span><span class="p">,</span>
-    <span class="s1">'power_t=0.5,'</span><span class="p">:</span> <span class="s2">"  # &lt;== constant 下不生效，但仍写死"</span><span class="p">,</span>
+    <span class="s1">'loss="perceptron",'</span><span class="p">:</span> <span class="s2">"  # &lt;== 固定损失"</span><span class="p">,</span>
+    <span class="s1">'learning_rate="constant",'</span><span class="p">:</span> <span class="s2">"  # &lt;== 固定学习率表"</span><span class="p">,</span>
+    <span class="s1">'eta0=1.0,'</span><span class="p">:</span> <span class="s2">"  # &lt;== 默认步长 1.0（允许修改）"</span><span class="p">,</span>
+    <span class="s1">'power_t=0.5,'</span><span class="p">:</span> <span class="s2">"  # &lt;== constant 下不生效，但仍固定"</span><span class="p">,</span>
 <span class="p">}</span>
 
 <span class="n">src</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getsource</span><span class="p">(</span><span class="n">Perceptron</span><span class="p">)</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span>
@@ -7802,7 +7812,7 @@ Cython 声明  (1): _sgd_fast.pxd
 
 <span class="n">sig</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="n">Perceptron</span><span class="o">.</span><span class="fm">__init__</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">()</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"== 签名证据：真正「禁止」的是签名，而不是 pop() =="</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== 签名证据：限制来自签名，而不是 pop() =="</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  'loss' in Perceptron.__init__ 签名   :"</span><span class="p">,</span> <span class="s2">"loss"</span> <span class="ow">in</span> <span class="n">sig</span><span class="o">.</span><span class="n">parameters</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  'average' in Perceptron.__init__ 签名:"</span><span class="p">,</span> <span class="s2">"average"</span> <span class="ow">in</span> <span class="n">sig</span><span class="o">.</span><span class="n">parameters</span><span class="p">)</span>
 
@@ -7871,7 +7881,7 @@ Cython 声明  (1): _sgd_fast.pxd
         tol=1e-3,
         shuffle=True,
         verbose=0,
-        eta0=1.0,  # &lt;== 默认步长 1.0（签名里可改）
+        eta0=1.0,  # &lt;== 默认步长 1.0（允许修改）
         n_jobs=None,
         random_state=0,
         early_stopping=False,
@@ -7881,7 +7891,7 @@ Cython 声明  (1): _sgd_fast.pxd
         warm_start=False,
     ):
         super().__init__(
-            loss="perceptron",  # &lt;== 锁死损失
+            loss="perceptron",  # &lt;== 固定损失
             penalty=penalty,
             alpha=alpha,
             l1_ratio=l1_ratio,
@@ -7891,18 +7901,18 @@ Cython 声明  (1): _sgd_fast.pxd
             shuffle=shuffle,
             verbose=verbose,
             random_state=random_state,
-            learning_rate="constant",  # &lt;== 锁死学习率表
+            learning_rate="constant",  # &lt;== 固定学习率表
             eta0=eta0,
             early_stopping=early_stopping,
             validation_fraction=validation_fraction,
             n_iter_no_change=n_iter_no_change,
-            power_t=0.5,  # &lt;== constant 下不生效，但仍写死
+            power_t=0.5,  # &lt;== constant 下不生效，但仍固定
             warm_start=warm_start,
             class_weight=class_weight,
             n_jobs=n_jobs,
         )
 
-== 签名证据：真正「禁止」的是签名，而不是 pop() ==
+== 签名证据：限制来自签名，而不是 pop() ==
   'loss' in Perceptron.__init__ 签名   : False
   'average' in Perceptron.__init__ 签名: False
 
@@ -7961,7 +7971,7 @@ Cython 声明  (1): _sgd_fast.pxd
 <span class="n">base</span> <span class="o">=</span> <span class="n">Perceptron</span><span class="p">(</span><span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
 <span class="n">l1</span> <span class="o">=</span> <span class="n">Perceptron</span><span class="p">(</span><span class="n">penalty</span><span class="o">=</span><span class="s2">"l1"</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"默认 penalty=None 的 coef[:2]:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">base</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">2</span><span class="p">],</span> <span class="mi">3</span><span class="p">))</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"penalty='l1'      的 coef[:2]:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">l1</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">2</span><span class="p">],</span> <span class="mi">3</span><span class="p">),</span> <span class="s2">"-&gt; 已带正则，不是教科书更新"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"penalty='l1'      的 coef[:2]:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">l1</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">2</span><span class="p">],</span> <span class="mi">3</span><span class="p">),</span> <span class="s2">"-&gt; 已带正则"</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -7982,7 +7992,7 @@ alpha=-1.0     -&gt; 构造通过，fit 期 InvalidParameterError The 'alpha' pa
 penalty='l1'   -&gt; 构造通过，fit 成功（coef[:2]=[ 3.851 -8.56 ]）
 
 默认 penalty=None 的 coef[:2]: [ 3.955 -8.664]
-penalty='l1'      的 coef[:2]: [ 3.851 -8.56 ] -&gt; 已带正则，不是教科书更新
+penalty='l1'      的 coef[:2]: [ 3.851 -8.56 ] -&gt; 已带正则
 </pre>
 </div>
 </div>
@@ -7995,16 +8005,17 @@ penalty='l1'      的 coef[:2]: [ 3.851 -8.56 ] -&gt; 已带正则，不是教�
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="5.-P2%EF%BD%9C%E3%80%8C%E6%84%9F%E7%9F%A5%E6%9C%BA%E6%8D%9F%E5%A4%B1%E3%80%8D%E5%B0%B1%E6%98%AF-Hinge(%CE%B8=0)">5. P2｜「感知机损失」就是 <code>Hinge(θ=0)</code><a class="anchor-link" href="#5.-P2%EF%BD%9C%E3%80%8C%E6%84%9F%E7%9F%A5%E6%9C%BA%E6%8D%9F%E5%A4%B1%E3%80%8D%E5%B0%B1%E6%98%AF-Hinge(%CE%B8=0)">¶</a></h2><p><code>loss_functions</code> 表里两行紧挨着：</p>
+<h2 id="5.-%E3%80%8C%E6%84%9F%E7%9F%A5%E6%9C%BA%E6%8D%9F%E5%A4%B1%E3%80%8D">5. 「感知机损失」<a class="anchor-link" href="#5.-%E3%80%8C%E6%84%9F%E7%9F%A5%E6%9C%BA%E6%8D%9F%E5%A4%B1%E3%80%8D">¶</a></h2><h3 id="5.1-Hinge()">5.1 <code>Hinge()</code><a class="anchor-link" href="#5.1-Hinge()">¶</a></h3><p><code>loss_functions</code> 表里两行紧挨着：</p>
 <div class="highlight"><pre><span></span><span class="s2">"hinge"</span><span class="p">:</span>      <span class="p">(</span><span class="n">Hinge</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span>
 <span class="s2">"perceptron"</span><span class="p">:</span> <span class="p">(</span><span class="n">Hinge</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span>
 </pre></div>
-<p>同一个 Cython 类，只差一个 <code>double</code> 阈值：<code>Hinge(0)</code> 是「零分界」，<code>Hinge(1)</code> 是「间隔 1 的线性 SVM」。两者的更新门槛都在<strong>折点处取等号</strong>（记 $z = y\cdot(w^\top x + b)$）：</p>
+<p>同一个 Cython 类，只差一个 <code>double</code> 阈值。沿用前面的记号：决策值 $f(x)=w^\top x + b$，带符号间隔 $z = y f(x)$。</p>
 <ul>
-<li><code>Hinge(0)</code>：<code>z &lt;= 0</code> 就更新；</li>
-<li><code>Hinge(1)</code>：<code>z &lt;= 1</code> 就更新。实测 <code>Hinge(1).py_dloss(1.0, 1.0) == -1.0</code>，即 <code>z = 1</code> 也更新。</li>
+<li><code>Hinge(0)</code>：<code>z &lt;= 0</code> 就更新，这就是感知机的判据；</li>
+<li><code>Hinge(1)</code>：<code>z &lt;= 1</code> 就更新，对应线性 SVM 常用的 hinge 损失；完整训练行为还取决于正则化和学习率设置。</li>
 </ul>
-<p>更硬核的是：<code>loss</code> / <code>dloss</code> 是 <code>cdef</code> 方法，Python 侧没有这两个名字——编译模块只额外暴露了专供测试的 <code>py_loss</code> / <code>py_dloss</code> 包装。正好可以<strong>直接读出</strong>判据，不必靠行为反推。</p>
+<p>实测 <code>Hinge(1).py_dloss(1.0, 1.0) == -1.0</code>，即 <code>z = 1</code> 也更新——两个折点都取等号。</p>
+<p>进一步看：<code>loss</code> / <code>dloss</code> 是 <code>cdef</code> 方法，Python 侧没有这两个名字——编译模块只额外暴露了专供测试的 <code>py_loss</code> / <code>py_dloss</code> 包装，正好可以<strong>直接读出</strong>判据，不必靠行为反推。</p>
 </div>
 </div>
 </div>
@@ -8215,9 +8226,10 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h3 id="%E5%BB%B6%E4%BC%B8%EF%BC%9A%E9%9B%B6%E5%88%9D%E5%A7%8B%E5%8C%96%E6%97%B6%E6%8D%9F%E5%A4%B1%E5%B7%B2%E7%BB%8F%E6%98%AF-0%EF%BC%8C%E4%B8%BA%E4%BB%80%E4%B9%88%E8%BF%98%E4%BC%9A%E6%9B%B4%E6%96%B0%EF%BC%9F">延伸：零初始化时损失已经是 0，为什么还会更新？<a class="anchor-link" href="#%E5%BB%B6%E4%BC%B8%EF%BC%9A%E9%9B%B6%E5%88%9D%E5%A7%8B%E5%8C%96%E6%97%B6%E6%8D%9F%E5%A4%B1%E5%B7%B2%E7%BB%8F%E6%98%AF-0%EF%BC%8C%E4%B8%BA%E4%BB%80%E4%B9%88%E8%BF%98%E4%BC%9A%E6%9B%B4%E6%96%B0%EF%BC%9F">¶</a></h3><p>训练一开始 <code>w = 0</code>、<code>b = 0</code>，于是每个样本的 <code>z = y·(wᵀx + b) = 0</code>。查上面的表：<code>Hinge(0)</code> 在 <code>z = 0</code> 处 <code>py_loss = 0</code>，但 <code>py_dloss = ∓1</code>。</p>
-<p>原因是 <code>max(0, -z)</code> 在 <code>z = 0</code> 处<strong>不可导</strong>（折点），实现必须挑一个次梯度，而 sklearn 挑的是<strong>非零的那一侧</strong>。后果很直接：<strong>零初始化后的第一个 epoch 里，每个样本都会触发一次更新</strong>——不是因为它们被分错，而是因为判据用了非零次梯度。这也正是更新规则写成 <code>&lt;= 0</code>（而不是 <code>&lt; 0</code>）的原因：零点不可微，实现选择了非零次梯度，算法就"必须"在那里动一下。</p>
-<p>反过来看也成立：如果把判据改成 <code>&lt; 0</code>，零初始化下没有任何样本命中，训练会一步不动地"立刻收敛"。</p>
+<h3 id="5.2-%E9%9B%B6%E5%88%9D%E5%A7%8B%E5%8C%96%E6%97%B6%E6%8D%9F%E5%A4%B1%E5%B7%B2%E7%BB%8F%E6%98%AF-0%EF%BC%8C%E4%B8%BA%E4%BB%80%E4%B9%88%E8%BF%98%E4%BC%9A%E6%9B%B4%E6%96%B0%EF%BC%9F">5.2 零初始化时损失已经是 0，为什么还会更新？<a class="anchor-link" href="#5.2-%E9%9B%B6%E5%88%9D%E5%A7%8B%E5%8C%96%E6%97%B6%E6%8D%9F%E5%A4%B1%E5%B7%B2%E7%BB%8F%E6%98%AF-0%EF%BC%8C%E4%B8%BA%E4%BB%80%E4%B9%88%E8%BF%98%E4%BC%9A%E6%9B%B4%E6%96%B0%EF%BC%9F">¶</a></h3><p>训练一开始 <code>w = 0</code>、<code>b = 0</code>，所有样本在初始模型下的决策值均为零，带符号间隔 <code>z = 0</code>。查上面的表：<code>Hinge(0)</code> 在 <code>z = 0</code> 处 <code>py_loss = 0</code>，但 <code>py_dloss = -y</code>（即 <code>∓1</code>）。</p>
+<p>原因是 <code>max(0, -z)</code> 在 <code>z = 0</code> 处<strong>不可导</strong>（折点），实现必须挑一个次梯度，而 sklearn 挑的是<strong>非零的那一侧</strong>。因此零初始化时，训练处理第一个样本就会采用非零次梯度进行更新；此后是否更新，取决于当前参数下的带符号间隔——一次更新立刻改变了后续样本面对的 <code>w</code>。</p>
+<p>这也正是更新规则写成 <code>&lt;= 0</code>（而不是 <code>&lt; 0</code>）的原因：零点不可微，实现选择了非零次梯度。</p>
+<p>反过来看也成立：如果把判据改成 <code>&lt; 0</code>，零初始化下第一个样本就不会命中，循环会因没有触发更新而提前结束，但这不代表分类正确。</p>
 </div>
 </div>
 </div>
@@ -8284,22 +8296,218 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 </div>
 </div>
 </div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=12f1a43e">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<h2 id="6.-%E5%AF%B9%E5%81%B6%E5%BD%A2%E5%BC%8F%EF%BC%9A%E4%BB%A3%E7%A0%81%E9%87%8C%E6%B2%A1%E6%9C%89%EF%BC%8C%E4%BD%86%E5%8F%AF%E4%BB%A5%E4%BA%8B%E5%90%8E%E9%87%8D%E5%BB%BA">6. 对偶形式：代码里没有，但可以事后重建<a class="anchor-link" href="#6.-%E5%AF%B9%E5%81%B6%E5%BD%A2%E5%BC%8F%EF%BC%9A%E4%BB%A3%E7%A0%81%E9%87%8C%E6%B2%A1%E6%9C%89%EF%BC%8C%E4%BD%86%E5%8F%AF%E4%BB%A5%E4%BA%8B%E5%90%8E%E9%87%8D%E5%BB%BA">¶</a></h2><p>感知机对偶形式，是用「每个样本被更新了几次」代替权重向量：</p>
+<p>$$w=\sum_i \alpha_i y_i x_i,\qquad \alpha_i \ge 0$$</p>
+<p>判错时只需 <code>α_i += 1</code>，判定时算 $\sum_j \alpha_j y_j (x_j \cdot x_i)$，于是内积可以换成核函数。<strong>sklearn 的实现中却没有使用这个简化公式</strong>。</p>
+<h3 id="6.1-%E4%BB%A3%E7%A0%81%E4%B8%AD%E6%B2%A1%E6%9C%89%E5%AF%B9%E5%81%B6%E7%9A%84%E7%97%95%E8%BF%B9">6.1 代码中没有对偶的痕迹<a class="anchor-link" href="#6.1-%E4%BB%A3%E7%A0%81%E4%B8%AD%E6%B2%A1%E6%9C%89%E5%AF%B9%E5%81%B6%E7%9A%84%E7%97%95%E8%BF%B9">¶</a></h3><ul>
+<li><code>Perceptron.__init__</code> 的签名里<strong>没有</strong> <code>kernel</code>、<code>dual</code> 两个形参（<code>SGDClassifier</code> 也没有）；</li>
+<li>fit 之后的属性只有 <code>coef_ / intercept_ / n_iter_ / t_ / loss_function_ / classes_ / n_features_in_</code>，<strong>没有</strong> <code>dual_coef_</code>、<code>support_</code>、<code>n_support_</code>；</li>
+<li>作为对照，<code>SVC(kernel="linear")</code> 才有 <code>dual_coef_</code>、<code>n_support_</code>——那是 libsvm 在<strong>对偶问题</strong>上做 SMO 的结果。</li>
+</ul>
+<h3 id="6.2-%E5%A4%8D%E6%9D%82%E5%BA%A6%EF%BC%9A%E5%AF%B9%E5%81%B6%E5%9C%A8%E3%80%8C%E7%BA%BF%E6%80%A7-+-%E5%A4%A7%E8%A7%84%E6%A8%A1%E3%80%8D%E4%B8%8B%E5%B9%B6%E4%B8%8D%E7%9C%81%E8%AE%A1%E7%AE%97">6.2 复杂度：对偶在「线性 + 大规模」下并不省计算<a class="anchor-link" href="#6.2-%E5%A4%8D%E6%9D%82%E5%BA%A6%EF%BC%9A%E5%AF%B9%E5%81%B6%E5%9C%A8%E3%80%8C%E7%BA%BF%E6%80%A7-+-%E5%A4%A7%E8%A7%84%E6%A8%A1%E3%80%8D%E4%B8%8B%E5%B9%B6%E4%B8%8D%E7%9C%81%E8%AE%A1%E7%AE%97">¶</a></h3><table>
+<thead>
+<tr>
+<th></th>
+<th>每次更新</th>
+<th>每次判定</th>
+<th>额外内存</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>原始（维护 <code>w</code>）</td>
+<td><code>O(d)</code></td>
+<td><code>O(d)</code></td>
+<td><code>O(d)</code></td>
+</tr>
+<tr>
+<td>对偶（维护 <code>α</code>，缓存 Gram）</td>
+<td><code>O(1)</code></td>
+<td><code>O(n)</code></td>
+<td><code>O(n²)</code></td>
+</tr>
+</tbody>
+</table>
+<p>对偶把成本从「写入」挪到了「读取」。感知机的定位是线性、大规模、在线（<code>n ≫ d</code>），这时 <code>O(n)</code> 的判定比 <code>O(d)</code> 贵一到两个数量级，还要额外 <code>O(n²)</code> 内存。只有 <code>n ≪ d</code> <strong>并且需要核函数</strong>时，对偶才开始划算。</p>
+<h3 id="6.3-%E5%85%B6%E4%BB%96%E7%90%86%E7%94%B1">6.3 其他理由<a class="anchor-link" href="#6.3-%E5%85%B6%E4%BB%96%E7%90%86%E7%94%B1">¶</a></h3><ol>
+<li><strong>核化收益用不上</strong>：<code>Perceptron</code> 是线性分类器，<code>decision_function</code> 直接算 <code>X @ coef_.T + intercept</code>，没有把内积抛到外面计算的机制。需要核时 sklearn 让人改用 <code>SVC(kernel=...)</code>，或用 <code>Nystroem</code> / <code>RBFSampler</code> 做核近似再套 SGD。</li>
+<li><strong>与整个 SGD 家族共享一条内核</strong>：<code>Perceptron</code> 只是 <code>BaseSGDClassifier</code> 的一个预设档位，和 <code>SGDClassifier</code>、<code>PassiveAggressive</code>、<code>Ridge</code> 共用 <code>_plain_sgd32/64</code>。这个内核维护显式的 <code>w</code>，损失只是 <code>loss_functions</code> 表里的一行。为单个 loss 另写一条对偶路径，等于为了 1/8 的情况复制一套无法表达 <code>penalty</code> / <code>learning_rate</code> / <code>average</code> / 稀疏分支的状态机。</li>
+<li><strong><code>α</code> 的「整数计数」语义会被后续开关破坏</strong>：<ul>
+<li>开 <code>penalty</code> 后每步 <code>w</code> 都要收缩，<code>w</code> 不再是样本的整数倍线性组合；</li>
+<li><code>learning_rate</code> 变化时，系数与全局步数 <code>t</code> 耦合，<code>α</code> 不再是纯计数；</li>
+<li><code>average=True</code>（ASGD）要对 <code>w</code> 做时间平均，用 <code>α</code> 表达会变成对更新历史的二次累加；</li>
+<li><code>partial_fit</code> 要增量扩展 Gram 矩阵，而对偶正是在线学习最不擅长的场景。</li>
+</ul>
+</li>
+</ol>
+<p>而 <code>Perceptron</code> 恰好只固定了 <code>loss</code> 与 <code>learning_rate</code>，<code>penalty</code>、<code>average</code>、<code>shuffle</code>、<code>tol</code> 全部开放——<strong>它公开允许配置的东西，正是 <code>α</code> 表示消化不了的部分</strong>。</p>
+<h3 id="6.4-%E4%BD%86%E6%81%92%E7%AD%89%E5%BC%8F%E5%AE%A2%E8%A7%82%E6%88%90%E7%AB%8B">6.4 但恒等式客观成立<a class="anchor-link" href="#6.4-%E4%BD%86%E6%81%92%E7%AD%89%E5%BC%8F%E5%AE%A2%E8%A7%82%E6%88%90%E7%AB%8B">¶</a></h3><p><code>eta0=1.0</code> 且 <code>penalty=None</code> 时，每次更新就是 <code>w += y_i x_i</code>，于是</p>
+<p>$$w=\sum_i c_i y_i x_i,\qquad c_i=\text{样本 } i \text{ 触发更新的次数}$$</p>
+<p>也就是说对偶解<strong>一直存在</strong>，只是从未作为训练状态存下来。下面的实验把这个恒等式重建出来，并验证它在改步长、加正则后如何失效。</p>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=f1e68589">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [9]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="cm-editor cm-s-jupyter">
+<div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.datasets</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_blobs</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model</span><span class="w"> </span><span class="kn">import</span> <span class="n">Perceptron</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.svm</span><span class="w"> </span><span class="kn">import</span> <span class="n">SVC</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">manual_counts</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">eta</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">max_epochs</span><span class="o">=</span><span class="mi">200</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""教科书循环，额外记录 c_i（隐含的对偶系数），并可选施加 L2 收缩。"""</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
+    <span class="n">w</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">X</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">max_epochs</span><span class="p">):</span>
+        <span class="n">mistakes</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">y</span><span class="p">)):</span>
+            <span class="k">if</span> <span class="n">alpha</span><span class="p">:</span>
+                <span class="n">w</span> <span class="o">*=</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">eta</span> <span class="o">*</span> <span class="n">alpha</span><span class="p">)</span>          <span class="c1"># L2 的收缩步骤</span>
+            <span class="k">if</span> <span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">X</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">@</span> <span class="n">w</span> <span class="o">+</span> <span class="n">b</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">w</span> <span class="o">+=</span> <span class="n">eta</span> <span class="o">*</span> <span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">*</span> <span class="n">X</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+                <span class="n">b</span> <span class="o">+=</span> <span class="n">eta</span> <span class="o">*</span> <span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+                <span class="n">c</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">mistakes</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="n">mistakes</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">break</span>
+    <span class="k">return</span> <span class="n">w</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span>
+
+
+<span class="n">X</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">make_blobs</span><span class="p">(</span><span class="n">n_samples</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span> <span class="n">centers</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">y</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="n">n</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="n">X</span><span class="o">.</span><span class="n">shape</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== 规模对照：原始 vs 对偶 =="</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  n=</span><span class="si">%d</span><span class="s2">, d=</span><span class="si">%d</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">d</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  原始：每次判定 </span><span class="si">%d</span><span class="s2"> 次乘加，状态 </span><span class="si">%d</span><span class="s2"> 个数"</span> <span class="o">%</span> <span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">d</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  对偶：每次判定 </span><span class="si">%d</span><span class="s2"> 次乘加，状态 </span><span class="si">%d</span><span class="s2"> 个数，Gram 矩阵 </span><span class="si">%d</span><span class="s2">×</span><span class="si">%d</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== 证据：签名与属性里没有对偶 =="</span><span class="p">)</span>
+<span class="n">sig</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="n">Perceptron</span><span class="o">.</span><span class="fm">__init__</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  签名有 kernel / dual ?"</span><span class="p">,</span> <span class="s2">"kernel"</span> <span class="ow">in</span> <span class="n">sig</span><span class="o">.</span><span class="n">parameters</span><span class="p">,</span> <span class="s2">"/"</span><span class="p">,</span> <span class="s2">"dual"</span> <span class="ow">in</span> <span class="n">sig</span><span class="o">.</span><span class="n">parameters</span><span class="p">)</span>
+<span class="n">sk</span> <span class="o">=</span> <span class="n">Perceptron</span><span class="p">(</span><span class="n">shuffle</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  fit 后属性         :"</span><span class="p">,</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">a</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="nb">vars</span><span class="p">(</span><span class="n">sk</span><span class="p">)</span> <span class="k">if</span> <span class="n">a</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">"_"</span><span class="p">)))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  有 dual_coef_ / support_ ?"</span><span class="p">,</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sk</span><span class="p">,</span> <span class="s2">"dual_coef_"</span><span class="p">),</span> <span class="s2">"/"</span><span class="p">,</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sk</span><span class="p">,</span> <span class="s2">"support_"</span><span class="p">))</span>
+<span class="n">sv</span> <span class="o">=</span> <span class="n">SVC</span><span class="p">(</span><span class="n">kernel</span><span class="o">=</span><span class="s2">"linear"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  SVC(kernel=linear)  : dual_coef_</span><span class="si">%s</span><span class="s2">, n_support_</span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">dual_coef_</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">n_support_</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== 恒等式重建：eta=1、无正则 =="</span><span class="p">)</span>
+<span class="n">w_m</span><span class="p">,</span> <span class="n">b_m</span><span class="p">,</span> <span class="n">c</span> <span class="o">=</span> <span class="n">manual_counts</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<span class="n">w_dual</span> <span class="o">=</span> <span class="p">(</span><span class="n">X</span> <span class="o">*</span> <span class="p">(</span><span class="n">c</span> <span class="o">*</span> <span class="n">y</span><span class="p">)[:,</span> <span class="kc">None</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">b_dual</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="n">y</span> <span class="o">==</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">-</span> <span class="n">c</span><span class="p">[</span><span class="n">y</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  sklearn coef_               :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">sk</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">4</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  Σ c_i·y_i·x_i               :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">w_dual</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  最大偏差                    :"</span><span class="p">,</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">sk</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">w_dual</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  allclose                    :"</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">sk</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">w_dual</span><span class="p">)))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  intercept_                  :"</span><span class="p">,</span> <span class="n">sk</span><span class="o">.</span><span class="n">intercept_</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">"| 由 c_i 重建:"</span><span class="p">,</span> <span class="n">b_dual</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  被用到的样本数 (c_i&gt;0)      : </span><span class="si">%d</span><span class="s2"> / </span><span class="si">%d</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="nb">int</span><span class="p">((</span><span class="n">c</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()),</span> <span class="n">n</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  -&gt; 对偶系数是整数计数，但 sklearn 只存 w"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== eta≠1：系数变成 eta × c_i =="</span><span class="p">)</span>
+<span class="n">sk_half</span> <span class="o">=</span> <span class="n">Perceptron</span><span class="p">(</span><span class="n">eta0</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">shuffle</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<span class="n">w_hm</span><span class="p">,</span> <span class="n">b_hm</span><span class="p">,</span> <span class="n">c_half</span> <span class="o">=</span> <span class="n">manual_counts</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">eta</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  sklearn(eta0=0.5) coef_     :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">sk_half</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">4</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  0.5 × Σ c_i·y_i·x_i         :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mf">0.5</span> <span class="o">*</span> <span class="p">(</span><span class="n">X</span> <span class="o">*</span> <span class="p">(</span><span class="n">c_half</span> <span class="o">*</span> <span class="n">y</span><span class="p">)[:,</span> <span class="kc">None</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span> <span class="mi">4</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  allclose                    :"</span><span class="p">,</span>
+      <span class="nb">bool</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">sk_half</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="p">(</span><span class="n">X</span> <span class="o">*</span> <span class="p">(</span><span class="n">c_half</span> <span class="o">*</span> <span class="n">y</span><span class="p">)[:,</span> <span class="kc">None</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">))))</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== 开 L2：同样的 c_i 再也重建不出 w =="</span><span class="p">)</span>
+<span class="n">w_reg</span><span class="p">,</span> <span class="n">b_reg</span><span class="p">,</span> <span class="n">c_reg</span> <span class="o">=</span> <span class="n">manual_counts</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.01</span><span class="p">)</span>
+<span class="n">gap</span> <span class="o">=</span> <span class="n">w_reg</span> <span class="o">-</span> <span class="p">(</span><span class="n">X</span> <span class="o">*</span> <span class="p">(</span><span class="n">c_reg</span> <span class="o">*</span> <span class="n">y</span><span class="p">)[:,</span> <span class="kc">None</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  实际 w                      :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">w_reg</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  Σ c_i·y_i·x_i               :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">((</span><span class="n">X</span> <span class="o">*</span> <span class="p">(</span><span class="n">c_reg</span> <span class="o">*</span> <span class="n">y</span><span class="p">)[:,</span> <span class="kc">None</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span> <span class="mi">4</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  偏差范数                    :"</span><span class="p">,</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">gap</span><span class="p">)))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  -&gt; 收缩让 w 不再是样本的整数倍线性组合，α 表示的语义失效"</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell-outputWrapper">
+<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
+</div>
+<div class="jp-OutputArea jp-Cell-outputArea">
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>== 规模对照：原始 vs 对偶 ==
+  n=60, d=2
+  原始：每次判定 2 次乘加，状态 2 个数
+  对偶：每次判定 60 次乘加，状态 60 个数，Gram 矩阵 60×60
+
+== 证据：签名与属性里没有对偶 ==
+  签名有 kernel / dual ? False / False
+  fit 后属性         : ['classes_', 'coef_', 'intercept_', 'loss_function_', 'n_features_in_', 'n_iter_', 't_']
+  有 dual_coef_ / support_ ? False / False
+  SVC(kernel=linear)  : dual_coef_(1, 11), n_support_[5 6]
+
+== 恒等式重建：eta=1、无正则 ==
+  sklearn coef_               : [  5.0679 -12.8513]
+  Σ c_i·y_i·x_i               : [  5.0679 -12.8513]
+  最大偏差                    : 6.039613253960852e-14
+  allclose                    : True
+  intercept_                  : 33.0 | 由 c_i 重建: 33.0
+  被用到的样本数 (c_i&gt;0)      : 24 / 60
+  -&gt; 对偶系数是整数计数，但 sklearn 只存 w
+
+== eta≠1：系数变成 eta × c_i ==
+  sklearn(eta0=0.5) coef_     : [ 2.534  -6.4257]
+  0.5 × Σ c_i·y_i·x_i         : [ 2.534  -6.4257]
+  allclose                    : True
+
+== 开 L2：同样的 c_i 再也重建不出 w ==
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>  实际 w                      : [ 2.4959 -8.6246]
+  Σ c_i·y_i·x_i               : [ 333.6407 -825.4106]
+  偏差范数                    : 881.3604200212343
+  -&gt; 收缩让 w 不再是样本的整数倍线性组合，α 表示的语义失效
+</pre>
+</div>
+</div>
+</div>
+</div>
+</div>
 <div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=a3505cc7">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="6.-P3%EF%BD%9C%E6%95%99%E7%A7%91%E4%B9%A6%E5%BE%AA%E7%8E%AF%E5%8F%AF%E4%BB%A5%E9%80%90%E5%85%83%E7%B4%A0%E5%A4%8D%E7%8E%B0%EF%BC%88%E6%9D%A1%E4%BB%B6%E5%BE%88%E7%AA%84%EF%BC%89">6. P3｜教科书循环可以逐元素复现（条件很窄）<a class="anchor-link" href="#6.-P3%EF%BD%9C%E6%95%99%E7%A7%91%E4%B9%A6%E5%BE%AA%E7%8E%AF%E5%8F%AF%E4%BB%A5%E9%80%90%E5%85%83%E7%B4%A0%E5%A4%8D%E7%8E%B0%EF%BC%88%E6%9D%A1%E4%BB%B6%E5%BE%88%E7%AA%84%EF%BC%89">¶</a></h2><p>只有把下面五个开关同时凑齐，算法才退化成课堂上那条循环：</p>
+<h2 id="7.-%E5%BE%AA%E7%8E%AF%E5%8F%AF%E4%BB%A5%E9%80%90%E5%85%83%E7%B4%A0%E5%A4%8D%E7%8E%B0%EF%BC%88%E6%9C%89%E6%9D%A1%E4%BB%B6%EF%BC%89">7. 循环可以逐元素复现（有条件）<a class="anchor-link" href="#7.-%E5%BE%AA%E7%8E%AF%E5%8F%AF%E4%BB%A5%E9%80%90%E5%85%83%E7%B4%A0%E5%A4%8D%E7%8E%B0%EF%BC%88%E6%9C%89%E6%9D%A1%E4%BB%B6%EF%BC%89">¶</a></h2><p>为便于与手工实现逐步对照，本实验使用<strong>固定样本顺序、稠密输入、无正则化，并关闭提前停止</strong>：</p>
 <ul>
 <li><code>shuffle=False</code>（不洗牌）</li>
 <li><code>tol=None</code>（不按 loss 早停，跑满 <code>max_iter</code>）</li>
-<li>稠密输入（避开 P8 的截距衰减）</li>
+<li>稠密输入（避开截距衰减）</li>
 <li><code>penalty=None</code>（无正则）</li>
 <li><code>early_stopping=False</code></li>
 </ul>
-<p>此时更新规则就是 <code>if y*(x@w+b) &lt;= 0: w += y*x; b += y</code>。注意是 <strong><code>&lt;=</code></strong>：决策值恰好为 0 时也会更新。</p>
-<p>实验中还要保证数据<strong>确实线性不可分</strong>：<code>make_blobs</code> 的两簇只是「有重叠」，重叠不等于不存在一条线性分界，用它不能严格证明不可分。所以在数据末尾追加<strong>相同特征、相反标签</strong>的样本对——只要这类矛盾对存在，任何线性模型都不可能全分对，不可分性才被真正钉死。</p>
+<p>此外，两种实现采用相同的零初始化、单位学习率和样本权重。此时更新规则就是 <code>if y*(x@w+b) &lt;= 0: w += y*x; b += y</code>。注意是 <strong><code>&lt;=</code></strong>：带符号间隔恰好为 0 时也会更新。</p>
+<p>为了防止模型找到解提前停止，实验数据需要<strong>线性不可分</strong>。<code>make_blobs</code> 的两簇只是有重叠，而重叠并不能排除存在一条线性分界，因此单靠它不能保证不可分。这里在数据末尾<strong>加入</strong>相同特征、相反标签的样本对。</p>
 </div>
 </div>
 </div>
@@ -8308,7 +8516,7 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [9]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [10]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
@@ -8317,7 +8525,7 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">manual_perceptron</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">max_epochs</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">op</span><span class="o">=</span><span class="s2">"&lt;="</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">"""教科书循环；op 用来对比 '&lt;' 与 '&lt;=' 两种判据。"""</span>
+<span class="w">    </span><span class="sd">"""标准循环；op 用来对比 '&lt;' 与 '&lt;=' 两种判据。"""</span>
     <span class="n">w</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">X</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
     <span class="n">b</span> <span class="o">=</span> <span class="mf">0.0</span>
     <span class="n">updates</span> <span class="o">=</span> <span class="mi">0</span>
@@ -8336,7 +8544,7 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
     <span class="k">return</span> <span class="n">w</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">max_epochs</span><span class="p">,</span> <span class="n">updates</span>
 
 
-<span class="c1"># 重叠区不能"证明"不可分；直接塞进两组"同特征、相反标签"的矛盾样本对，</span>
+<span class="c1"># 重叠区不能保证不可分；加入两组「同特征、相反标签」的矛盾样本对，</span>
 <span class="c1"># 任何线性分界都不可能把它们同时分对 -&gt; 不可分是确定的。</span>
 <span class="n">X_blob</span><span class="p">,</span> <span class="n">y_blob</span> <span class="o">=</span> <span class="n">make_blobs</span><span class="p">(</span><span class="n">n_samples</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">centers</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">7</span><span class="p">,</span> <span class="n">cluster_std</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
 <span class="n">y_blob</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">y_blob</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
@@ -8364,7 +8572,8 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
     <span class="n">same</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">w</span><span class="p">,</span> <span class="n">sk</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="ow">and</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">sk</span><span class="o">.</span><span class="n">intercept_</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
     <span class="nb">print</span><span class="p">(</span><span class="s2">"  手工用 '</span><span class="si">%s</span><span class="s2">' : epochs=</span><span class="si">%d</span><span class="s2">, updates=</span><span class="si">%d</span><span class="s2">, 与 sklearn 近似一致=</span><span class="si">%s</span><span class="s2">"</span>
           <span class="o">%</span> <span class="p">(</span><span class="n">op</span><span class="p">,</span> <span class="n">ep</span><span class="p">,</span> <span class="n">upd</span><span class="p">,</span> <span class="n">same</span><span class="p">))</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  用 '&lt;' 时首轮零初始化下 z 全为 0、无一命中，直接 0 次更新就「收敛」了"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  用 '&lt;' 时零初始化下第一个样本就不命中，循环因没有触发更新而提前结束"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  （提前结束不代表分类正确）"</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">()</span>
 
 <span class="nb">print</span><span class="p">(</span><span class="s2">"== 单样本边界：决策值恰好为 0 时是否更新 =="</span><span class="p">)</span>
@@ -8408,7 +8617,8 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>  手工用 '&lt;=' : epochs=1000, updates=18583, 与 sklearn 近似一致=True
-  用 '&lt;' 时首轮零初始化下 z 全为 0、无一命中，直接 0 次更新就「收敛」了
+  用 '&lt;' 时零初始化下第一个样本就不命中，循环因没有触发更新而提前结束
+  （提前结束不代表分类正确）
 
 == 单样本边界：决策值恰好为 0 时是否更新 ==
   perceptron intercept_ = [1.] （从 0 变成 1 -&gt; 0 分界也更新）
@@ -8428,18 +8638,18 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="7.-P4%EF%BD%9C%E6%96%87%E6%A1%A3%E9%87%8C%E7%9A%84%E3%80%8C%E6%9B%B4%E6%96%B0%E6%AC%A1%E6%95%B0%E3%80%8D%E5%BA%94%E8%AF%A5%E6%80%8E%E4%B9%88%E7%90%86%E8%A7%A3">7. P4｜文档里的「更新次数」应该怎么理解<a class="anchor-link" href="#7.-P4%EF%BD%9C%E6%96%87%E6%A1%A3%E9%87%8C%E7%9A%84%E3%80%8C%E6%9B%B4%E6%96%B0%E6%AC%A1%E6%95%B0%E3%80%8D%E5%BA%94%E8%AF%A5%E6%80%8E%E4%B9%88%E7%90%86%E8%A7%A3">¶</a></h2><p><code>Perceptron</code> 的属性文档写：</p>
+<h2 id="8.-%E6%96%87%E6%A1%A3%E9%87%8C%E7%9A%84%E3%80%8C%E6%9B%B4%E6%96%B0%E6%AC%A1%E6%95%B0%E3%80%8D%E5%BA%94%E8%AF%A5%E6%80%8E%E4%B9%88%E7%90%86%E8%A7%A3">8. 文档里的「更新次数」应该怎么理解<a class="anchor-link" href="#8.-%E6%96%87%E6%A1%A3%E9%87%8C%E7%9A%84%E3%80%8C%E6%9B%B4%E6%96%B0%E6%AC%A1%E6%95%B0%E3%80%8D%E5%BA%94%E8%AF%A5%E6%80%8E%E4%B9%88%E7%90%86%E8%A7%A3">¶</a></h2><p><code>Perceptron</code> 的属性文档写：</p>
 <blockquote>
 <p><em>Number of weight updates performed during training. Same as <code>(n_iter_ * n_samples + 1)</code>.</em></p>
 </blockquote>
 <p>这句话不能按字面读。<code>t_</code> 是<strong>按迭代轮数和输入样本数维护的计数属性</strong>，它不等同于参数实际改变的次数：</p>
 <ul>
-<li><strong>P3 的实验</strong>里，204 个样本跑满 1000 轮 → <code>t_ = 1000 × 204 + 1</code>，但真正发生权重更新的只有 18000 多次；</li>
+<li><strong>前一节的实验</strong>里，204 个样本跑满 1000 轮 → <code>t_ = 1000 × 204 + 1</code>，但真正发生权重更新的只有 <strong>18583</strong> 次；</li>
 <li>启用验证集（<code>early_stopping=True</code>）时，外层公式仍然使用<strong>完整的输入样本数</strong>，被切出去当验证集的那部分样本照样计入；</li>
-<li>多分类时 <code>_fit_multiclass</code> 先取各二分类 <code>n_iter_</code> 的<strong>最大值</strong>，再乘以样本数，所以 <code>t_</code> 不对应任何一个二分类器的真实遍历量。</li>
+<li>多分类时，<code>t_</code> 根据各二分类器的<strong>最大</strong>训练轮数计算，因此不能表示所有二分类器的累计样本处理次数。</li>
 </ul>
 <p>所以稳妥的表述是：<strong><code>t_</code> 是按迭代轮数和输入样本数维护的计数属性，不能直接解释为参数实际改变的次数。</strong></p>
-<p>补充两条生命周期：<code>fit</code> 每次都把 <code>t_</code> 重置为 1.0；<code>partial_fit</code> 不重置、跨调用累加（下面的代码同时验证这两点）。</p>
+<p>注：<code>fit</code> 每次都把 <code>t_</code> 重置为 1.0；<code>partial_fit</code> 不重置、跨调用累加（下面的代码同时验证这两点）。</p>
 </div>
 </div>
 </div>
@@ -8448,7 +8658,7 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [10]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [11]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
@@ -8505,13 +8715,7 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 <pre>== 二分类 ==
   n_iter_=15, n_samples=60, t_=901, 公式值=901
   early_stopping: n_iter_=7, t_=421, 公式值=421
-</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>== 多分类（digits）==
+== 多分类（digits）==
   n_iter_=22, n_samples=1797, t_=39535, 公式值=39535
 
 == partial_fit：t_ 累积，n_iter_ 恒为 1 ==
@@ -8532,7 +8736,7 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="8.-P5%EF%BD%9C%E5%A4%9A%E5%88%86%E7%B1%BB-=-OvA-+-joblib%EF%BC%9An_jobs-%E5%8F%AA%E5%9C%A8%E5%A4%9A%E5%88%86%E7%B1%BB%E7%94%9F%E6%95%88">8. P5｜多分类 = OvA + joblib：<code>n_jobs</code> 只在多分类生效<a class="anchor-link" href="#8.-P5%EF%BD%9C%E5%A4%9A%E5%88%86%E7%B1%BB-=-OvA-+-joblib%EF%BC%9An_jobs-%E5%8F%AA%E5%9C%A8%E5%A4%9A%E5%88%86%E7%B1%BB%E7%94%9F%E6%95%88">¶</a></h2><p><code>Perceptron</code> 没有 softmax、也没有多类联合更新。<code>_partial_fit</code> 在 <code>n_classes &gt; 2</code> 时走 <code>_fit_multiclass</code>：</p>
+<h2 id="9.-%E5%A4%9A%E5%88%86%E7%B1%BB-=-OvA-+-joblib%EF%BC%9An_jobs-%E5%8F%AA%E5%9C%A8%E5%A4%9A%E5%88%86%E7%B1%BB%E7%94%9F%E6%95%88">9. 多分类 = OvA + joblib：<code>n_jobs</code> 只在多分类生效<a class="anchor-link" href="#9.-%E5%A4%9A%E5%88%86%E7%B1%BB-=-OvA-+-joblib%EF%BC%9An_jobs-%E5%8F%AA%E5%9C%A8%E5%A4%9A%E5%88%86%E7%B1%BB%E7%94%9F%E6%95%88">¶</a></h2><p><code>Perceptron</code> 没有 softmax、也没有多类联合更新。<code>_partial_fit</code> 在 <code>n_classes &gt; 2</code> 时走 <code>_fit_multiclass</code>：</p>
 <ul>
 <li>每个类各训一个「本类 vs 其余」的二分类器；</li>
 <li>先在外层用<strong>原始多分类标签</strong>算好验证掩码，所有 OvA job 共享；</li>
@@ -8548,7 +8752,7 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [11]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [12]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
@@ -8612,13 +8816,13 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="9.-P6-/-P7%EF%BD%9C%E5%90%8C%E4%B8%80%E5%A5%97%E3%80%8C%E8%80%90%E5%BF%83%E3%80%8D%E6%9C%BA%E5%88%B6%EF%BC%8C%E5%8F%AA%E6%98%AF%E7%9B%91%E6%8E%A7%E6%8C%87%E6%A0%87%E4%B8%8D%E5%90%8C">9. P6 / P7｜同一套「耐心」机制，只是监控指标不同<a class="anchor-link" href="#9.-P6-/-P7%EF%BD%9C%E5%90%8C%E4%B8%80%E5%A5%97%E3%80%8C%E8%80%90%E5%BF%83%E3%80%8D%E6%9C%BA%E5%88%B6%EF%BC%8C%E5%8F%AA%E6%98%AF%E7%9B%91%E6%8E%A7%E6%8C%87%E6%A0%87%E4%B8%8D%E5%90%8C">¶</a></h2><p><strong>P6（<code>tol</code>）</strong>：停止条件不是「和上一轮比」，而是<strong>和历史最优损失比</strong>。源码 docstring 原文：</p>
+<h2 id="10.-%E5%90%8C%E4%B8%80%E5%A5%97%E3%80%8C%E8%80%90%E5%BF%83%E3%80%8D%E6%9C%BA%E5%88%B6%EF%BC%8C%E5%8F%AA%E6%98%AF%E7%9B%91%E6%8E%A7%E6%8C%87%E6%A0%87%E4%B8%8D%E5%90%8C">10. 同一套「耐心」机制，只是监控指标不同<a class="anchor-link" href="#10.-%E5%90%8C%E4%B8%80%E5%A5%97%E3%80%8C%E8%80%90%E5%BF%83%E3%80%8D%E6%9C%BA%E5%88%B6%EF%BC%8C%E5%8F%AA%E6%98%AF%E7%9B%91%E6%8E%A7%E6%8C%87%E6%A0%87%E4%B8%8D%E5%90%8C">¶</a></h2><p><strong><code>tol</code></strong>：停止条件不是「和上一轮比」，而是<strong>和历史最优损失比</strong>。源码 docstring 原文：</p>
 <blockquote>
 <p><em>training will stop when <code>(loss &gt; best_loss - tol)</code> for <code>n_iter_no_change</code> consecutive epochs.</em></p>
 </blockquote>
 <p>也就是说：<strong>连续 <code>n_iter_no_change</code> 轮（默认 5）都没能把历史最优 loss 压低超过 <code>tol</code>，才停</strong>，而不是「单轮下降不足 <code>tol</code> 就停」。它监控的是<strong>训练</strong> loss。<code>tol=None</code> 时阈值被换成 <code>-inf</code>，上式永不成立，等于永不早停；因为 <code>self.tol is not None</code> 不成立，连 <code>ConvergenceWarning</code> 都不会报。</p>
-<p><strong>P7（<code>early_stopping</code>）</strong>：用 <code>StratifiedShuffleSplit</code> 切出验证集，监控量从训练 loss 换成<strong>验证集 score</strong>，判据变成「验证 score 连续 <code>n_iter_no_change</code> 轮提升不足 <code>tol</code>」。所以两者是<strong>同一套耐心计数机制，选择不同的监控指标</strong>（越高越好 vs 越低越好）；<code>partial_fit</code> 直接禁止早停。</p>
-<p>下面的实验：既看 <code>tol=None/1e-3</code> 的警告差异，也直接扫 <code>n_iter_no_change</code>，看「耐心」这个参数如何线性地推迟停止。</p>
+<p><strong><code>early_stopping</code></strong>：用 <code>StratifiedShuffleSplit</code> 切出验证集，监控量从训练 loss 换成<strong>验证集 score</strong>，判据变成「验证 score 连续 <code>n_iter_no_change</code> 轮提升不足 <code>tol</code>」。所以两者是<strong>同一套耐心计数机制，选择不同的监控指标</strong>（越高越好 vs 越低越好）；<code>partial_fit</code> 直接禁止早停。</p>
+<p>下面的实验：既看 <code>tol=None/1e-3</code> 的警告差异，也直接扫 <code>n_iter_no_change</code>，观察等待轮数如何影响停止时间。</p>
 </div>
 </div>
 </div>
@@ -8627,7 +8831,7 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [12]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [13]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
@@ -8709,8 +8913,9 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="10.-P8%EF%BD%9C%E7%A8%80%E7%96%8F%E8%BE%93%E5%85%A5%E7%9A%84%E6%88%AA%E8%B7%9D%E6%AF%8F%E6%AD%A5%E5%8F%AA%E8%B5%B0-1%25">10. P8｜稀疏输入的截距每步只走 1%<a class="anchor-link" href="#10.-P8%EF%BD%9C%E7%A8%80%E7%96%8F%E8%BE%93%E5%85%A5%E7%9A%84%E6%88%AA%E8%B7%9D%E6%AF%8F%E6%AD%A5%E5%8F%AA%E8%B5%B0-1%25">¶</a></h2><p><code>make_dataset</code> 对稠密输入返回 <code>intercept_decay=1.0</code>，对稀疏输入返回 <code>SPARSE_INTERCEPT_DECAY=0.01</code>（源码注释：<em>avoid intercept oscillation</em>）。</p>
-<p>结果：<strong>同一份数据、同一组超参，<code>csr_matrix</code> 与稠密数组会得到不同的模型</strong>。感知机默认不加正则，截距被压慢后，系数需要「补偿」它。</p>
+<h2 id="11.-%E7%A8%80%E7%96%8F%E8%BE%93%E5%85%A5%E9%87%87%E7%94%A8%E8%BE%83%E5%B0%8F%E7%9A%84%E6%88%AA%E8%B7%9D%E6%9B%B4%E6%96%B0%E6%AD%A5%E9%95%BF">11. 稀疏输入采用较小的截距更新步长<a class="anchor-link" href="#11.-%E7%A8%80%E7%96%8F%E8%BE%93%E5%85%A5%E9%87%87%E7%94%A8%E8%BE%83%E5%B0%8F%E7%9A%84%E6%88%AA%E8%B7%9D%E6%9B%B4%E6%96%B0%E6%AD%A5%E9%95%BF">¶</a></h2><p><code>make_dataset</code> 对稠密输入返回 <code>intercept_decay=1.0</code>，对稀疏输入返回 <code>SPARSE_INTERCEPT_DECAY=0.01</code>（源码注释：<em>avoid intercept oscillation</em>）。</p>
+<p>在更新量相同的情况下，稀疏路径将单次截距增量乘以 0.01。随着训练继续，两种路径的模型参数和后续更新可能不同，因此最终截距不一定相差 100 倍。</p>
+<p>结果：<strong>同一份数据、同一组超参，<code>csr_matrix</code> 与稠密数组可能得到不同的模型</strong>。感知机默认不加正则，截距更新的差异会影响后续样本的判断，从而改变系数的更新轨迹。</p>
 </div>
 </div>
 </div>
@@ -8719,7 +8924,7 @@ hinge     ：dloss 在 z &lt;= 1 时非零 -&gt; 分界在间隔 1（z = 1 也�
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [13]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [14]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
@@ -8779,14 +8984,14 @@ coef 是否一致: False
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="11.-P9-/-P10%EF%BD%9C%E6%9D%83%E9%87%8D%E4%B8%8D%E7%AD%89%E4%BB%B7%E4%BA%8E%E9%87%8D%E9%87%87%E6%A0%B7%EF%BC%9B%E6%84%9F%E7%9F%A5%E6%9C%BA%E6%B2%A1%E6%9C%89%E6%A6%82%E7%8E%87">11. P9 / P10｜权重不等价于重采样；感知机没有概率<a class="anchor-link" href="#11.-P9-/-P10%EF%BD%9C%E6%9D%83%E9%87%8D%E4%B8%8D%E7%AD%89%E4%BB%B7%E4%BA%8E%E9%87%8D%E9%87%87%E6%A0%B7%EF%BC%9B%E6%84%9F%E7%9F%A5%E6%9C%BA%E6%B2%A1%E6%9C%89%E6%A6%82%E7%8E%87">¶</a></h2><p><strong>P9（<code>class_weight</code>）</strong>：<code>class_weight="balanced"</code> 只算出每类一个<strong>实数</strong>权重（本实验是 <code>[0.5952, 3.125]</code>，比例 1 : 5.25），数据不复制、行数不变；权重按 <code>sample_weight</code> <strong>乘性</strong>叠加到每次更新的幅度上（实测把所有样本权重乘 2，<code>coef_</code> 也翻倍，见下）。</p>
-<p>它和「复制少数类样本」<strong>不等价</strong>，但理由<strong>不是</strong>"比例凑不齐"——比例其实能凑齐：多数类复制 4 份、少数类复制 21 份，两类样本数都变成 1008，比例正好是 1 : 5.25。真正的区别在<strong>在线学习</strong>的机制上：</p>
+<h2 id="12.-%E6%9D%83%E9%87%8D%E4%B8%8D%E7%AD%89%E4%BB%B7%E4%BA%8E%E9%87%8D%E9%87%87%E6%A0%B7%EF%BC%9B%E6%84%9F%E7%9F%A5%E6%9C%BA%E6%B2%A1%E6%9C%89%E6%A6%82%E7%8E%87">12. 权重不等价于重采样；感知机没有概率<a class="anchor-link" href="#12.-%E6%9D%83%E9%87%8D%E4%B8%8D%E7%AD%89%E4%BB%B7%E4%BA%8E%E9%87%8D%E9%87%87%E6%A0%B7%EF%BC%9B%E6%84%9F%E7%9F%A5%E6%9C%BA%E6%B2%A1%E6%9C%89%E6%A6%82%E7%8E%87">¶</a></h2><p><strong><code>class_weight</code></strong>：<code>class_weight="balanced"</code> 只算出每类一个<strong>实数</strong>权重（本实验是 <code>[0.5952, 3.125]</code>，权重比为 1 : 5.25），数据不复制、行数不变；权重按 <code>sample_weight</code> <strong>乘性</strong>叠加到每次更新的幅度上（实测把所有样本权重乘 2，<code>coef_</code> 也翻倍，见下）。</p>
+<p>它和「复制样本」<strong>不等价</strong>。比例本身是可以对齐的：多数类与少数类的复制倍数分别为 <strong>4 和 21</strong>，其比例与类别权重比例一致；复制后两类样本数均为 <strong>1008</strong>，类别数量比为 <strong>1 : 1</strong>。真正的区别在<strong>在线学习</strong>的机制上：</p>
 <ul>
-<li><code>balanced</code> 放大的是<strong>单次更新的幅度</strong>（0.5952 / 3.125 的乘性系数），一次更新算一步；</li>
+<li><code>balanced</code> 按类别权重<strong>缩放单次更新的幅度</strong>（多数类权重 0.5952 &lt; 1，少数类 3.125 &gt; 1），一次更新算一步；</li>
 <li>复制改变的是<strong>访问次数与遍历顺序</strong>（每个 epoch 的样本数不同、洗牌后的排列也不同），一次更新只算一步。</li>
 </ul>
-<p>感知机每步都在改 <code>w</code>，后续样本的判定取决于当前 <code>w</code>。所以「把一次更新放大」和「把样本多访问几次」不会走出同一条轨迹；实测两者连等比缩放都算不上：<code>coef</code> 比值是 <code>0.171 / 0.213</code>，不是同一个常数。</p>
-<p><strong>P10（API）</strong>：<code>Perceptron</code> 没有 <code>predict_proba</code>，只有未校准的 <code>decision_function</code>。二分类返回 1D，多分类返回 2D，<code>predict</code> 走符号 / <code>argmax</code>。</p>
+<p>感知机每步都在改 <code>w</code>，后续样本的判定取决于当前 <code>w</code>。所以「缩放一次更新」和「重复访问样本」<strong>通常不能保证相同的训练轨迹</strong>；实测两个坐标的系数比值分别为 <strong>0.171 和 0.213</strong>，不是同一个常数。</p>
+<p><strong>API</strong>：<code>Perceptron</code> 没有 <code>predict_proba</code>，可以通过 <code>decision_function</code> 获得决策分数，但这些分数不能直接解释为概率。二分类返回 1D，多分类返回 2D，<code>predict</code> 走符号 / <code>argmax</code>。</p>
 </div>
 </div>
 </div>
@@ -8795,7 +9000,7 @@ coef 是否一致: False
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [14]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [15]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
@@ -8821,15 +9026,15 @@ coef 是否一致: False
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  coef(sw=1) ="</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">w1</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  coef(sw=2) ="</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">w2</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="s2">"  比值 ="</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">w2</span> <span class="o">/</span> <span class="n">w1</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
 
-<span class="c1"># 让"总权重质量"对齐：balanced 权重比是 5.25 = 21/4 -&gt; 少数类复制 21 份、多数类复制 4 份</span>
+<span class="c1"># 复制倍数与类别权重比例对齐：权重比 5.25 = 21/4 -&gt; 多数类 ×4、少数类 ×21</span>
 <span class="n">maj</span><span class="p">,</span> <span class="n">mino</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">argmax</span><span class="p">(</span><span class="n">cnt</span><span class="p">)),</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">cnt</span><span class="p">))</span>
 <span class="n">k</span> <span class="o">=</span> <span class="p">{</span><span class="n">maj</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span> <span class="n">mino</span><span class="p">:</span> <span class="mi">21</span><span class="p">}</span>
 <span class="n">X_rep</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">X</span><span class="p">[</span><span class="n">y</span> <span class="o">==</span> <span class="n">c</span><span class="p">],</span> <span class="n">k</span><span class="p">[</span><span class="n">c</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)])</span>
 <span class="n">y_rep</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">y</span><span class="p">[</span><span class="n">y</span> <span class="o">==</span> <span class="n">c</span><span class="p">],</span> <span class="n">k</span><span class="p">[</span><span class="n">c</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)])</span>
 <span class="nb">print</span><span class="p">()</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"== 让两类「总权重质量」对齐：多数类(类 </span><span class="si">%d</span><span class="s2">) ×</span><span class="si">%d</span><span class="s2">，少数类(类 </span><span class="si">%d</span><span class="s2">) ×</span><span class="si">%d</span><span class="s2"> =="</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== 按类别权重比例设定复制倍数：多数类(类 </span><span class="si">%d</span><span class="s2">) ×</span><span class="si">%d</span><span class="s2">，少数类(类 </span><span class="si">%d</span><span class="s2">) ×</span><span class="si">%d</span><span class="s2"> =="</span>
       <span class="o">%</span> <span class="p">(</span><span class="n">maj</span><span class="p">,</span> <span class="n">k</span><span class="p">[</span><span class="n">maj</span><span class="p">],</span> <span class="n">mino</span><span class="p">,</span> <span class="n">k</span><span class="p">[</span><span class="n">mino</span><span class="p">]))</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  原始样本数 </span><span class="si">%s</span><span class="s2"> -&gt; 复制后 </span><span class="si">%s</span><span class="s2">（比例 </span><span class="si">%s</span><span class="s2">）"</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  原始样本数 </span><span class="si">%s</span><span class="s2"> -&gt; 复制后 </span><span class="si">%s</span><span class="s2">（类别数量比 </span><span class="si">%s</span><span class="s2">）"</span>
       <span class="o">%</span> <span class="p">(</span><span class="n">cnt</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">bincount</span><span class="p">(</span><span class="n">y_rep</span><span class="p">),</span>
          <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">bincount</span><span class="p">(</span><span class="n">y_rep</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">bincount</span><span class="p">(</span><span class="n">y_rep</span><span class="p">)</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span> <span class="mi">3</span><span class="p">)))</span>
 
@@ -8843,9 +9048,10 @@ coef 是否一致: False
       <span class="o">%</span> <span class="p">(</span><span class="n">k</span><span class="p">[</span><span class="n">maj</span><span class="p">],</span> <span class="n">k</span><span class="p">[</span><span class="n">mino</span><span class="p">],</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">rep</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">3</span><span class="p">),</span> <span class="n">rep</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)))</span>
 <span class="nb">print</span><span class="p">()</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  coef 近似相同 (np.allclose) :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">bal</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="n">rep</span><span class="o">.</span><span class="n">coef_</span><span class="p">))</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  coef 比值 rep/bal           :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">rep</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="n">bal</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">3</span><span class="p">),</span>
-      <span class="s2">"-&gt; 不是常数，连等比缩放都不成立"</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  -&gt; balanced 放大单次更新幅度；复制改变访问次数与顺序，在线轨迹因此不同"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  coef 两坐标比值 rep/bal     :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">rep</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="n">bal</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">3</span><span class="p">),</span>
+      <span class="s2">"-&gt; 不是同一个常数，不能视为等比缩放"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  -&gt; balanced 按类别权重缩放单次更新；复制改变访问次数与顺序"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  -&gt; 两者通常不能保证相同的训练轨迹"</span><span class="p">)</span>
 
 <span class="k">try</span><span class="p">:</span>
     <span class="n">Perceptron</span><span class="p">(</span><span class="n">class_weight</span><span class="o">=</span><span class="s2">"balanced"</span><span class="p">)</span><span class="o">.</span><span class="n">partial_fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">classes</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]))</span>
@@ -8884,15 +9090,22 @@ coef 是否一致: False
   coef(sw=1) = [-2.562  -1.0226]
   coef(sw=2) = [-5.124  -2.0453]   比值 = [2. 2.]
 
-== 让两类「总权重质量」对齐：多数类(类 0) ×4，少数类(类 1) ×21 ==
-  原始样本数 [252  48] -&gt; 复制后 [1008 1008]（比例 [1. 1.]）
-
+== 按类别权重比例设定复制倍数：多数类(类 0) ×4，少数类(类 1) ×21 ==
+  原始样本数 [252  48] -&gt; 复制后 [1008 1008]（类别数量比 [1. 1.]）
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>
   class_weight='balanced' : coef=[ 8.829 -5.29 ], train score=0.720
   复制多数×4 / 少数×21    : coef=[ 1.506 -1.128], train score=0.813
 
   coef 近似相同 (np.allclose) : False
-  coef 比值 rep/bal           : [0.171 0.213] -&gt; 不是常数，连等比缩放都不成立
-  -&gt; balanced 放大单次更新幅度；复制改变访问次数与顺序，在线轨迹因此不同
+  coef 两坐标比值 rep/bal     : [0.171 0.213] -&gt; 不是同一个常数，不能视为等比缩放
+  -&gt; balanced 按类别权重缩放单次更新；复制改变访问次数与顺序
+  -&gt; 两者通常不能保证相同的训练轨迹
 
   partial_fit + balanced -&gt; ValueError : class_weight 'balanced' is not supported for partial_fit. In order to use 'balan
 
@@ -8913,68 +9126,73 @@ coef 是否一致: False
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="12.-%E5%B0%8F%E7%BB%93">12. 小结<a class="anchor-link" href="#12.-%E5%B0%8F%E7%BB%93">¶</a></h2><table>
+<h2 id="13.-%E5%B0%8F%E7%BB%93">13. 小结<a class="anchor-link" href="#13.-%E5%B0%8F%E7%BB%93">¶</a></h2><table>
 <thead>
 <tr>
 <th>#</th>
 <th>现象</th>
-<th>一句话</th>
+<th>分析</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>P1</td>
+<td>1</td>
 <td>文件 221 行 / 类体 213 行（docstring 158 行）</td>
-<td>减法 API：签名里没有 <code>loss</code>、<code>average</code>，再写死 <code>constant</code></td>
+<td>公开参数缩减：签名里没有 <code>loss</code>、<code>average</code>；<code>loss</code>/<code>learning_rate</code> 固定，<code>eta0</code> 默认 1.0 可改</td>
 </tr>
 <tr>
-<td>P2</td>
+<td>2</td>
 <td><code>perceptron → Hinge(0.0)</code>，<code>hinge → Hinge(1.0)</code></td>
 <td>两者只差一个阈值，且折点处取等号（<code>z &lt;= θ</code> 就更新）</td>
 </tr>
 <tr>
-<td>P3</td>
-<td><code>shuffle=False + tol=None</code> 时手工循环逐元素一致</td>
-<td>边界是 <code>y·f(x) &lt;= 0</code>；不可分性靠"相反标签样本对"保证</td>
+<td>3</td>
+<td><code>shuffle=False + tol=None</code> 时手工循环近似一致（<code>np.allclose</code>）</td>
+<td>边界是 <code>z &lt;= 0</code>；不可分性靠「相反标签样本对」严格保证</td>
 </tr>
 <tr>
-<td>P4</td>
+<td>4</td>
 <td><code>t_</code> 按「迭代轮数 × 输入样本数」维护</td>
-<td>文档说"更新次数"，但不能等同于参数实际改变次数</td>
+<td>文档说「更新次数」，但不能等同于参数实际改变次数</td>
 </tr>
 <tr>
-<td>P5</td>
+<td>5</td>
 <td>多分类 OvA + joblib</td>
 <td><code>n_jobs</code> 只在多分类生效，<code>n_iter_</code> 取最大值</td>
 </tr>
 <tr>
-<td>P6</td>
+<td>6</td>
 <td><code>tol</code> 与<strong>历史最优</strong> loss 比较</td>
 <td>连续 <code>n_iter_no_change</code> 轮改善不足才停；<code>tol=None</code> 静默跑满</td>
 </tr>
 <tr>
-<td>P7</td>
+<td>7</td>
 <td><code>early_stopping</code> 看验证集</td>
 <td>同一套耐心计数，只是换成监控验证 score</td>
 </tr>
 <tr>
-<td>P8</td>
-<td>稀疏截距衰减 0.01</td>
-<td>同一数据 dense 与 csr 得到不同模型（<code>b</code> 3.0 vs 0.14）</td>
+<td>8</td>
+<td>稀疏输入截距步长衰减 0.01</td>
+<td>同一数据 dense 与 csr 可能得到不同模型（<code>b</code> 3.0 vs 0.14）</td>
 </tr>
 <tr>
-<td>P9</td>
+<td>9</td>
 <td><code>class_weight</code> 是乘性权重</td>
-<td>放大单次更新幅度 ≠ 重复访问样本，与重采样不等价</td>
+<td>按类别权重缩放单次更新 ≠ 重复访问样本，与重采样不等价</td>
 </tr>
 <tr>
-<td>P10</td>
+<td>10</td>
 <td>没有 <code>predict_proba</code></td>
-<td>只有未校准的 <code>decision_function</code></td>
+<td><code>decision_function</code> 给出决策分数，但不能直接解释为概率</td>
+</tr>
+<tr>
+<td>11</td>
+<td>没有对偶形式</td>
+<td>只维护 <code>w</code>；<code>w = Σ c_i y_i x_i</code> 可事后重建，开正则或改步长后失效</td>
 </tr>
 </tbody>
 </table>
-<p><strong>收尾</strong>：所有「不一样」都能回溯到基类的开关——<code>loss</code> / <code>learning_rate</code> / <code>penalty</code> / <code>average</code> / <code>shuffle</code> / <code>tol</code> / <code>early_stopping</code> / 稀疏分支。<code>Perceptron</code> 做的事情，就是把这些开关固定成课堂上那个感知机；一旦某个开关被打开（例如 <code>penalty='l1'</code> 或稀疏输入），它就不再是教科书里的算法了。</p>
+<p><code>Perceptron</code> 的定位是：复用基类训练实现，固定 <code>loss</code> 与 <code>learning_rate</code>，缩减 <code>loss</code> / <code>average</code> 两个公开参数，并给 <code>eta0</code>、<code>penalty</code>、<code>shuffle</code>、<code>tol</code>、<code>early_stopping</code> 等提供默认值。因此默认配置对应原始的标准感知机，但其中若干开关仍可由用户调整。</p>
 </div>
 </div>
 </div>
