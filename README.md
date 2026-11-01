@@ -26,6 +26,7 @@
 | 3 | 朴素贝叶斯源码解析 | `sklearn.naive_bayes` | [homework3-NaiveBayes.ipynb](homework3-NaiveBayes.ipynb) | [homework3-NaiveBayes.html](homework3-NaiveBayes.html) |
 | 4 | 线性回归源码解析 | `sklearn.linear_model` | [homework4-LinearRegression.ipynb](homework4-LinearRegression.ipynb) | [homework4-LinearRegression.html](homework4-LinearRegression.html) |
 | 5 | 感知机源码解析 | `sklearn.linear_model.Perceptron` | [homework5-Perceptron.ipynb](homework5-Perceptron.ipynb) | [homework5-Perceptron.html](homework5-Perceptron.html) |
+| 6 | 逻辑回归源码解析 | `sklearn.linear_model.LogisticRegression` | [homework6-LogisticRegression.ipynb](homework6-LogisticRegression.ipynb) | [homework6-LogisticRegression.html](homework6-LogisticRegression.html) |
 
 ### 作业一：KMeans
 
@@ -68,6 +69,17 @@
 - **对偶形式**：代码里没有对偶路径，但 `eta0=1 且无正则` 时 `w = Σ c_i y_i x_i` 可事后重建（实测偏差 `6e-14`），开正则或改步长后恒等式失效；
 - **循环可复现**：在严格不可分数据上，手工教科书循环与 sklearn 逐元素近似一致（`updates=18583` vs `t_=204001`），判据实测为 `y·(wᵀx+b) <= 0`（等于 0 也更新）；
 - **状态与开关**：`t_` 是按迭代轮数与输入样本数维护的计数属性、`n_jobs` 只在多分类生效、早停与 `tol` 共用同一套耐心计数但监控指标不同、稀疏路径截距单步增量乘以 `0.01`、`class_weight="balanced"` 与重采样不等价。
+
+### 作业六：逻辑回归
+
+`LogisticRegression` 的 Python 类只做参数校验、数据整形与结果拼装，算法本身分散在 5 套后端和 3 份 log loss 实现里：
+
+- **六个 solver = 五套后端**：liblinear 在 `fit` 里直接早退（C++ 坐标下降），`lbfgs` 交给 scipy，`newton-cg` 用自写共轭梯度，`newton-cholesky` 用显式 Hessian，`sag` / `saga` 共用 Cython 内核；`n_iter_` 因此承载了四种量纲，docstring 对 liblinear 的描述还与实现不符；
+- **同一个 `C` 的四种尺度**：`1/C`、`1/(C·Σsw)`、`alpha/n` 与 liblinear 的 `C`；`penalty=None` 实际是「`C=inf` + `penalty='l2'`」，liblinear 下则走另一条查表报错；
+- **三种多分类**：liblinear C++ 内部 OvR、Python joblib OvR、multinomial 联合优化（靠 `classes_=[None]` 让 joblib 只迭代一次）；
+- **半参数化**：二分类 multinomial 只保存一行系数，预测时用 `[-d, d]` 补出第 0 类；
+- **两种牛顿法**：`newton-cg` 的 matrix-free `hessp` 与 `newton-cholesky` 的 `O(d²)` 显式 Hessian，实测 `hessp(v)` 与 `H @ v` 一致到 `1e-14`；
+- **静默忽略清单**：`penalty=None` 下的 `C`、非 liblinear 的 `intercept_scaling`、liblinear 的 `warm_start` 都静默失效；`l1_ratio` 会警告，显式 `multinomial` + liblinear / newton-cholesky 会报错。
 
 ---
 
