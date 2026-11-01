@@ -7538,86 +7538,6 @@ a.anchor-link {
 <p><strong>主线</strong>：<code>linear_model.LogisticRegression</code> 与 <code>LogisticRegressionCV</code>；<code>SGDClassifier(loss="log_loss")</code> 不在主线（hw5 已讲 SGD 框架）。</p>
 </blockquote>
 <p>环境：<code>scikit-learn 1.3.2</code> / Python 3.8。文中行号均以 <strong>1.3.2</strong> 版本的库为准；notebook 内的行号一律由 <code>inspect</code> 现场取得。</p>
-<p><strong><code>LogisticRegression</code> 不是「一个算法 + 若干优化器」，而是 6 个 solver 字符串映射到 5 套互不共享代码的后端，外层再叠加 3 种多分类实现与 3 份 log loss 实现。类本身的 Python 代码只做参数校验、数据整形、结果拼装。</strong></p>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=3ece4a42">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="0.-%E7%8E%AF%E5%A2%83%E4%B8%8E%E6%BA%90%E7%A0%81%E5%9C%B0%E5%9B%BE">0. 环境与源码地图<a class="anchor-link" href="#0.-%E7%8E%AF%E5%A2%83%E4%B8%8E%E6%BA%90%E7%A0%81%E5%9C%B0%E5%9B%BE">¶</a></h2><p>逻辑回归的实现横跨四层，其中三层在运行时是<strong>编译产物</strong>：</p>
-<table>
-<thead>
-<tr>
-<th>文件</th>
-<th>行数</th>
-<th>形式</th>
-<th>内容</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>linear_model/_logistic.py</code></td>
-<td>2114</td>
-<td>纯 Python</td>
-<td><code>LogisticRegression</code>（类体 623 行，docstring 284 行）、<code>LogisticRegressionCV</code>（698 行）、<code>_logistic_regression_path</code></td>
-</tr>
-<tr>
-<td><code>linear_model/_sag.py</code></td>
-<td>372</td>
-<td>纯 Python</td>
-<td>SAG/SAGA 外层：步长估计、warm start 内存、dtype 分派</td>
-</tr>
-<tr>
-<td><code>linear_model/_linear_loss.py</code></td>
-<td>658</td>
-<td>纯 Python</td>
-<td><code>LinearModelLoss</code>：loss / gradient / hessian / hessp</td>
-</tr>
-<tr>
-<td><code>linear_model/_glm/_newton_solver.py</code></td>
-<td>525</td>
-<td>纯 Python</td>
-<td><code>NewtonSolver</code> 抽象基类 + <code>NewtonCholeskySolver</code></td>
-</tr>
-<tr>
-<td><code>svm/_base.py</code></td>
-<td>1262</td>
-<td>纯 Python</td>
-<td><code>_fit_liblinear</code> 包装 + <code>_get_liblinear_solver_type</code> 魔数表</td>
-</tr>
-<tr>
-<td><code>utils/optimize.py</code></td>
-<td>267</td>
-<td>纯 Python</td>
-<td><code>_newton_cg</code></td>
-</tr>
-<tr>
-<td><code>linear_model/_sag_fast*.so</code></td>
-<td>—</td>
-<td>Cython</td>
-<td>SAG/SAGA 内循环</td>
-</tr>
-<tr>
-<td><code>_loss/_loss*.so</code></td>
-<td>—</td>
-<td>Cython</td>
-<td>log loss / sigmoid / softmax 内核</td>
-</tr>
-<tr>
-<td><code>svm/_liblinear*.so</code></td>
-<td>—</td>
-<td>C++</td>
-<td>liblinear 坐标下降内核</td>
-</tr>
-</tbody>
-</table>
-<p>因此本文有两条证据线：<strong>能 dump 的 Python 代码</strong>给结构，<strong>不能 dump 的 <code>.so</code></strong> 只给行为实测。凡涉及 liblinear、<code>_sag_fast</code>、<code>_loss</code> 内循环的结论，都不假装引用源码。</p>
-<p><code>LogisticRegression</code> 的类体只有 623 行，其中 284 行是 docstring；扣掉文档字符串后真正的代码约 339 行 —— 它主要在做参数校验、<code>classes_</code> 整形、joblib 调度与结果拼装，优化本身全部外包。</p>
 </div>
 </div>
 </div>
@@ -7775,7 +7695,7 @@ logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linea
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="1.-%E5%85%AD%E4%B8%AA-solver-%E5%AD%97%E7%AC%A6%E4%B8%B2-=-%E4%BA%94%E5%A5%97%E4%BA%92%E4%B8%8D%E5%85%B1%E4%BA%AB%E4%BB%A3%E7%A0%81%E7%9A%84%E5%90%8E%E7%AB%AF">1. 六个 solver 字符串 = 五套互不共享代码的后端<a class="anchor-link" href="#1.-%E5%85%AD%E4%B8%AA-solver-%E5%AD%97%E7%AC%A6%E4%B8%B2-=-%E4%BA%94%E5%A5%97%E4%BA%92%E4%B8%8D%E5%85%B1%E4%BA%AB%E4%BB%A3%E7%A0%81%E7%9A%84%E5%90%8E%E7%AB%AF">¶</a></h2><p><code>_check_solver</code> 只做合法性检查，不选后端。真正的分派发生在两个地方：</p>
+<h2 id="1.-%E5%85%AD%E4%B8%AA-solver-%E5%AD%97%E7%AC%A6%E4%B8%B2">1. 六个 solver 字符串<a class="anchor-link" href="#1.-%E5%85%AD%E4%B8%AA-solver-%E5%AD%97%E7%AC%A6%E4%B8%B2">¶</a></h2><p><code>_check_solver</code> 只进行合法性检查，在以下两处进行分派：</p>
 <ol>
 <li><strong><code>fit</code> 里 liblinear 直接早退</strong>：<code>solver == "liblinear"</code> 时调用 <code>_fit_liblinear</code> 后立刻 <code>return self</code>，<strong>完全不经过</strong> <code>_logistic_regression_path</code>；</li>
 <li><strong>path 里的四支</strong>：其余五个 solver 在同一个 <code>for C in Cs</code> 循环内分成 <code>lbfgs</code> / <code>newton-cg</code> / <code>newton-cholesky</code> / <code>sag+saga</code> 四支。</li>
@@ -7784,7 +7704,7 @@ logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linea
 <thead>
 <tr>
 <th>solver</th>
-<th>后端</th>
+<th>实现</th>
 <th>入口</th>
 <th><code>n_iter_</code> 来源</th>
 </tr>
@@ -7822,9 +7742,9 @@ logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linea
 </tr>
 </tbody>
 </table>
-<p><code>solver</code> 不只是「优化器开关」，它同时决定：能否 <code>inspect.getsource</code>、支持什么 <code>penalty</code>、<code>tol</code> 的量纲、<code>n_iter_</code> 的语义、并行方式（进程 / 线程 / 无）。</p>
-<p>还有一个结构细节：path 里其实也有一段 <code>elif solver == "liblinear"</code>，但 <code>LogisticRegression.fit</code> 永远走不到它 —— 它只服务 <code>LogisticRegressionCV</code>（CV 通过 <code>_log_reg_scoring_path</code> 调 path）。</p>
-<p><strong>同解实测</strong>：同一份 300×8 二分类数据，<code>tol=1e-6, max_iter=1000</code>。六个 solver 的系数差异都在 <code>5.5e-4</code> 以内，但目标函数值不同：liblinear 是 <code>111.928882</code>，其余是 <code>111.928737</code>。这是<strong>优化精度</strong>的差异，不是目标函数不同。</p>
+<p><code>solver</code> 同时决定：<code>penalty</code>、<code>tol</code> 的量纲、<code>n_iter_</code> 的语义、并行方式（进程 / 线程 / 无）。</p>
+<p>path 里其实也有一段 <code>elif solver == "liblinear"</code>，但 <code>LogisticRegression.fit</code> 永远走不到它 —— 它只服务 <code>LogisticRegressionCV</code>（CV 通过 <code>_log_reg_scoring_path</code> 调 path）。</p>
+<p>使用同一份 300×8 二分类数据，设定 <code>tol=1e-6, max_iter=1000</code> 进行测试。六个 solver 的系数差异都在 <code>5.5e-4</code> 以内，但目标函数值不同：liblinear 是 <code>111.928882</code>，其余是 <code>111.928737</code>，<strong>优化精度</strong>有差异。</p>
 </div>
 </div>
 </div>
@@ -7967,15 +7887,40 @@ saga            [22]          2.30e-05  111.928737089      0
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h2 id="2.-C%E3%80%81penalty=None%E3%80%81sample_weight%EF%BC%9A%E5%90%8C%E4%B8%80%E4%B8%AA%E7%9B%AE%E6%A0%87%E5%87%BD%E6%95%B0%E7%9A%84%E4%B8%89%E7%A7%8D%E5%B0%BA%E5%BA%A6">2. <code>C</code>、<code>penalty=None</code>、<code>sample_weight</code>：同一个目标函数的三种尺度<a class="anchor-link" href="#2.-C%E3%80%81penalty=None%E3%80%81sample_weight%EF%BC%9A%E5%90%8C%E4%B8%80%E4%B8%AA%E7%9B%AE%E6%A0%87%E5%87%BD%E6%95%B0%E7%9A%84%E4%B8%89%E7%A7%8D%E5%B0%BA%E5%BA%A6">¶</a></h2><p>统一写成一个未归一化目标：</p>
-<div class="highlight"><pre><span></span>sum_i sample_weight_i * loss_i(w) + ||w||^2 / (2C)
+<div class="highlight"><pre><span></span>sum_i sample_weight_i * loss_i(w) + ‖w‖² / (2C)
 </pre></div>
-<p>但进入后端前，这个式子被改写成了三种不同尺度：</p>
-<p>| 后端 | 实际目标 | 缩放方式 |
-|---|---|---|
-| <code>lbfgs</code> / <code>newton-cg</code> | <code>LinearModelLoss</code> + <code>l2_reg_strength = 1/C</code> | 直接 |
-| <code>newton-cholesky</code> | 先把 <code>sample_weight</code> 归一到和为 1，再令 <code>l2_reg_strength = 1/(C * sum(sw))</code> | 源码注释原话 <code>nasty matter</code> |
-| <code>sag</code> / <code>saga</code> | <code>alpha = 1/C</code>，再 <code>alpha_scaled = alpha / n_samples</code> | 因为 SAG 的目标是 <code>(1/n) sum loss</code> |
-| <code>liblinear</code> | C++ 内部 <code>0.5||w||^2 + C * sum loss</code> | 整体除以 C |</p>
+<p>但进入具体实现前，这个式子被改写成了三种不同尺度：</p>
+<table>
+<thead>
+<tr>
+<th>实现</th>
+<th>实际目标</th>
+<th>缩放方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lbfgs</code> / <code>newton-cg</code></td>
+<td><code>LinearModelLoss</code> + <code>l2_reg_strength = 1/C</code></td>
+<td>直接</td>
+</tr>
+<tr>
+<td><code>newton-cholesky</code></td>
+<td>先把 <code>sample_weight</code> 归一到和为 1，再令 <code>l2_reg_strength = 1/(C * sum(sw))</code></td>
+<td>源码注释原话 <code>nasty matter</code></td>
+</tr>
+<tr>
+<td><code>sag</code> / <code>saga</code></td>
+<td><code>alpha = 1/C</code>，再 <code>alpha_scaled = alpha / n_samples</code></td>
+<td>因为 SAG 的目标是 <code>(1/n) sum loss</code></td>
+</tr>
+<tr>
+<td><code>liblinear</code></td>
+<td>C++ 内部 <code>0.5‖w‖² + C * sum loss</code></td>
+<td>整体除以 C</td>
+</tr>
+</tbody>
+</table>
 <p><code>penalty=None</code> 不是一条独立的「无正则」分支：<code>fit</code> 把 <code>C_</code> 换成 <code>np.inf</code>，再把 <code>penalty</code> 改回 <code>"l2"</code>。因此 <code>C</code> 被完全忽略，而且<strong>只有 <code>C != 1</code> 时才发警告</strong>。</p>
 <p>liblinear 更特殊：<code>_check_solver</code> 只拦字符串 <code>"none"</code>，<code>None</code> 会一路传到 <code>_get_liblinear_solver_type</code>，最后抛查表式错误。同一个「关正则」，两种写法、两套错误路径。</p>
 <p><code>sample_weight</code> 整体缩放会改变模型：因为权重与 <code>C</code> 在目标函数里是耦合的。把权重全乘 7，等价于把 <code>C</code> 乘 7。</p>
@@ -8335,7 +8280,7 @@ saga            [22]          2.30e-05  111.928737089      0
 </tr>
 </tbody>
 </table>
-<p><code>multi_class="auto"</code> 不是「自动挑最好的」，而是一张<strong>能力表</strong>：<code>liblinear</code> / <code>newton-cholesky</code> 强制 <code>ovr</code>；其余 solver 在 <code>n_classes &gt; 2</code> 时给 <code>multinomial</code>，二分类回 <code>ovr</code>。显式写 <code>multinomial</code> 遇到不支持的后端直接 <code>ValueError</code>。</p>
+<p><code>multi_class="auto"</code> 不是「自动挑最好的」，而是一张<strong>能力表</strong>：<code>liblinear</code> / <code>newton-cholesky</code> 强制 <code>ovr</code>；其余 solver 在 <code>n_classes &gt; 2</code> 时给 <code>multinomial</code>，二分类回 <code>ovr</code>。显式写 <code>multinomial</code> 遇到不支持的实现直接 <code>ValueError</code>。</p>
 <p>一个容易误读的细节：multinomial 分支里的 <code>classes_ = [None]</code> 不是为了标签，而是为了<strong>让 joblib 的循环只跑一次</strong>；<code>pos_class</code> 在 multinomial 路径里根本不参与计算。</p>
 <p>并行方式也随 solver 变：<code>sag</code> / <code>saga</code> 释放 GIL，所以 <code>prefer="threads"</code>；其余 solver 用 <code>prefer="processes"</code>。</p>
 </div>
@@ -8485,7 +8430,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-InputPrompt jp-InputArea-prompt">In [12]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== 不支持的后端组合 =="</span><span class="p">)</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== 不支持的实现组合 =="</span><span class="p">)</span>
 <span class="k">try</span><span class="p">:</span>
     <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="s2">"newton-cholesky"</span><span class="p">,</span>
                        <span class="n">multi_class</span><span class="o">=</span><span class="s2">"multinomial"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xdig</span><span class="p">,</span> <span class="n">ydig</span><span class="p">)</span>
@@ -8509,7 +8454,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>== 不支持的后端组合 ==
+<pre>== 不支持的实现组合 ==
   newton-cholesky + multinomial -&gt; Solver newton-cholesky does not support a multinomial backend.
   liblinear + multinomial      -&gt; Solver liblinear does not support a multinomial backend.
 </pre>
@@ -8722,14 +8667,14 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>== digits 前 300 个样本：两种牛顿法 ==
-  newton-cg        multi_class=multinomial n_iter_=[23]               形状=(1,)   用时=0.05s
+  newton-cg        multi_class=multinomial n_iter_=[23]               形状=(1,)   用时=0.06s
 </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>  newton-cholesky  multi_class=ovr         n_iter_=[11, 11, 10, 11, 11, 10, 11, 11, 10, 10] 形状=(10,)  用时=2.66s
+<pre>  newton-cholesky  multi_class=ovr         n_iter_=[11, 11, 10, 11, 11, 10, 11, 11, 10, 10] 形状=(10,)  用时=5.89s
 </pre>
 </div>
 </div>
@@ -8851,7 +8796,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 </tr>
 <tr>
 <td><code>tol</code></td>
-<td>各后端</td>
+<td>各实现</td>
 <td>量纲不同：<code>gtol</code> / CG 相对残差 / liblinear 的 <code>eps</code></td>
 </tr>
 </tbody>
@@ -9138,7 +9083,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 </tr>
 </tbody>
 </table>
-<p>三者的数学形式相同，但<strong>归一化方式不同</strong>：<code>LinearModelLoss</code> 返回 <code>sum_i sw_i * loss_i</code>，SAG 的目标是 <code>(1/n) sum_i loss_i</code>，liblinear 是 <code>C * sum_i loss_i + 0.5||w||^2</code>。这也是同一个 <code>C</code> 需要三种缩放的原因。</p>
+<p>三者的数学形式相同，但<strong>归一化方式不同</strong>：<code>LinearModelLoss</code> 返回 <code>sum_i sw_i * loss_i</code>，SAG 的目标是 <code>(1/n) sum_i loss_i</code>，liblinear 是 <code>C * sum_i loss_i + 0.5‖w‖²</code>。这也是同一个 <code>C</code> 需要三种缩放的原因。</p>
 <p><strong>dtype 能力矩阵</strong>：<code>lbfgs</code> 强制 <code>float64</code>；其余 solver 接受 <code>[float64, float32]</code>，但 <code>liblinear</code> 内部再转回 <code>float64</code>。所以 <code>float32</code> 输入下，只有 <code>newton-cg</code> / <code>newton-cholesky</code> / <code>sag</code> / <code>saga</code> 的 <code>coef_</code> 保持 <code>float32</code>。</p>
 <p><strong><code>n_threads</code></strong>：<code>_logistic_regression_path</code> 里有一段看起来很讲究的分支，注释说「未来希望用 OpenMP 线程」，但 1.3.2 的两个分支都赋值 <code>1</code> —— 实际并行仍然靠 joblib 按类分发，损失内核是单线程。</p>
 </div>
@@ -9208,7 +9153,13 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
   lbfgs           coef_.dtype=float64  n_iter_=[10]
   liblinear       coef_.dtype=float64  n_iter_=[5]
   newton-cg       coef_.dtype=float32  n_iter_=[9]
-  newton-cholesky coef_.dtype=float32  n_iter_=[5]
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>  newton-cholesky coef_.dtype=float32  n_iter_=[5]
   sag             coef_.dtype=float32  n_iter_=[26]
   saga            coef_.dtype=float32  n_iter_=[16]
 </pre>
@@ -9255,7 +9206,13 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 1301|             n_threads = 1
 1302| 
 
-  OpenMP 可用线程数: 10
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>  OpenMP 可用线程数: 10
   但 LogisticRegression 的损失内核没有使用它
 </pre>
 </div>
@@ -9281,12 +9238,12 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <tr>
 <td><code>solver</code></td>
 <td><code>fit</code> 早退 / path 四支</td>
-<td>6 个字符串对应 5 套后端，决定可读性、penalty、dtype、<code>n_iter_</code> 语义</td>
+<td>6 个字符串对应 5 套实现，决定可读性、penalty、dtype、<code>n_iter_</code> 语义</td>
 </tr>
 <tr>
 <td><code>C</code></td>
 <td>path 的 <code>1/C</code>、<code>1/(C·sw_sum)</code>、<code>alpha/n</code>、liblinear 的 <code>C</code></td>
-<td>进后端前被换成四种尺度；<code>penalty=None</code> 下失效</td>
+<td>进入实现前被换成四种尺度；<code>penalty=None</code> 下失效</td>
 </tr>
 <tr>
 <td><code>penalty</code></td>
@@ -9335,12 +9292,12 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 </tr>
 <tr>
 <td><code>tol</code></td>
-<td>各后端</td>
+<td>各实现</td>
 <td>量纲不同，不能跨 solver 比较</td>
 </tr>
 <tr>
 <td><code>max_iter</code></td>
-<td>各后端</td>
+<td>各实现</td>
 <td>liblinear 每类计数；sag 是 epoch；牛顿法是外层迭代</td>
 </tr>
 <tr>
@@ -9355,7 +9312,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 </tr>
 </tbody>
 </table>
-<p>一句话收尾：<strong>读 <code>LogisticRegression</code> 的源码，90% 的代码在做「把统一的参数翻译成五种后端的方言」；真正的算法在 <code>.so</code> 和 scipy 里。</strong></p>
+<p>一句话收尾：<strong>读 <code>LogisticRegression</code> 的源码，90% 的代码在做「把统一的参数翻译成五种实现的方言」；真正的算法在 <code>.so</code> 和 scipy 里。</strong></p>
 </div>
 </div>
 </div>
