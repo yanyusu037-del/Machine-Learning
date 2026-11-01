@@ -7537,7 +7537,8 @@ a.anchor-link {
 <blockquote>
 <p><strong>主线</strong>：<code>linear_model.LogisticRegression</code> 与 <code>LogisticRegressionCV</code>；<code>SGDClassifier(loss="log_loss")</code> 不在主线（hw5 已讲 SGD 框架）。</p>
 </blockquote>
-<p>环境：<code>scikit-learn 1.3.2</code> / Python 3.8。文中行号均以 <strong>1.3.2</strong> 版本的库为准；notebook 内的行号一律由 <code>inspect</code> 现场取得。</p>
+<p>环境：<code>scikit-learn 1.3.2</code> / Python 3.8。文中行号均以 <strong>1.3.2</strong> 版本的库为准；notebook 内的行号一律由 <code>inspect</code> 现场取得，版本不符时第一段代码的断言会直接失败。</p>
+<p><strong>阅读路线</strong>：§1 是数学目标与符号；§2–§4 建立 <code>fit</code> 的骨架（solver 分派 → <code>n_iter_</code> 语义 → 多分类策略）；§5–§6 是两个代表性求解器的实现；§7–§8 讲 CV 与预测；§9–§10 收参数落点与数值边界；§11 是汇总表。每节按「问题 → 关键源码 → 实验 → 结论」展开，也可以按需跳读。</p>
 </div>
 </div>
 </div>
@@ -7558,12 +7559,15 @@ a.anchor-link {
 <span class="kn">import</span><span class="w"> </span><span class="nn">sklearn</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogisticRegression</span><span class="p">,</span> <span class="n">LogisticRegressionCV</span>
 
+<span class="k">assert</span> <span class="n">sklearn</span><span class="o">.</span><span class="n">__version__</span> <span class="o">==</span> <span class="s2">"1.3.2"</span><span class="p">,</span> <span class="p">(</span>
+    <span class="s2">"本 notebook 的行号按 1.3.2 取得，当前版本是 </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="n">sklearn</span><span class="o">.</span><span class="n">__version__</span><span class="p">)</span>
+
 <span class="n">LOGISTIC_PATH</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getsourcefile</span><span class="p">(</span><span class="n">LogisticRegression</span><span class="p">)</span>
 <span class="n">LOGISTIC_LINES</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="n">LOGISTIC_PATH</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span>
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">show_file</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">ranges</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-    <span class="c1"># 按行号区间打印源码；行号来自当前安装的 1.3.2 文件</span>
+    <span class="c1"># 按行号区间打印源码；区间由 find_span 或 inspect 现场算出</span>
     <span class="k">if</span> <span class="n">title</span><span class="p">:</span>
         <span class="nb">print</span><span class="p">(</span><span class="n">title</span><span class="p">)</span>
     <span class="n">lines</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span>
@@ -7578,8 +7582,22 @@ a.anchor-link {
     <span class="n">show_file</span><span class="p">(</span><span class="n">LOGISTIC_PATH</span><span class="p">,</span> <span class="n">ranges</span><span class="p">,</span> <span class="n">title</span><span class="p">)</span>
 
 
+<span class="k">def</span><span class="w"> </span><span class="nf">find_span</span><span class="p">(</span><span class="n">start_pat</span><span class="p">,</span> <span class="n">end_pat</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">last</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="c1"># 按关键字现场定位区间：从 start_pat 首次出现处起，</span>
+    <span class="c1"># 到 end_pat 其后首次出现（last=True 时取其最后一次出现）</span>
+    <span class="k">if</span> <span class="n">func</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">src</span><span class="p">,</span> <span class="n">first</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getsourcelines</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">src</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span>
+        <span class="n">first</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">i0</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">src</span><span class="p">)</span> <span class="k">if</span> <span class="n">start_pat</span> <span class="ow">in</span> <span class="n">line</span><span class="p">)</span>
+    <span class="n">hits</span> <span class="o">=</span> <span class="p">[</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">src</span><span class="p">))</span> <span class="k">if</span> <span class="n">end_pat</span> <span class="ow">in</span> <span class="n">src</span><span class="p">[</span><span class="n">i</span><span class="p">]]</span>
+    <span class="n">i1</span> <span class="o">=</span> <span class="n">hits</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="n">last</span> <span class="k">else</span> <span class="n">hits</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">first</span> <span class="o">+</span> <span class="n">i0</span><span class="p">,</span> <span class="n">first</span> <span class="o">+</span> <span class="n">i1</span><span class="p">)</span>
+
+
 <span class="nb">print</span><span class="p">(</span><span class="s2">"python   :"</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">version</span><span class="o">.</span><span class="n">split</span><span class="p">()[</span><span class="mi">0</span><span class="p">])</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"sklearn  :"</span><span class="p">,</span> <span class="n">sklearn</span><span class="o">.</span><span class="n">__version__</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"sklearn  :"</span><span class="p">,</span> <span class="n">sklearn</span><span class="o">.</span><span class="n">__version__</span><span class="p">,</span> <span class="s2">"（版本断言通过）"</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"numpy    :"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">__version__</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"logistic :"</span><span class="p">,</span> <span class="n">LOGISTIC_PATH</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">()</span>
@@ -7606,7 +7624,7 @@ a.anchor-link {
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>python   : 3.8.20
-sklearn  : 1.3.2
+sklearn  : 1.3.2 （版本断言通过）
 numpy    : 1.24.4
 logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linear_model/_logistic.py
 
@@ -7688,6 +7706,344 @@ logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linea
 </div>
 </div>
 </div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=prepdata01">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [3]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="cm-editor cm-s-jupyter">
+<div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.datasets</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_classification</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model._linear_loss</span><span class="w"> </span><span class="kn">import</span> <span class="n">LinearModelLoss</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn._loss.loss</span><span class="w"> </span><span class="kn">import</span> <span class="n">HalfBinomialLoss</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.preprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="n">StandardScaler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model._logistic</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_check_multi_class</span><span class="p">,</span>
+    <span class="n">_check_solver</span><span class="p">,</span>
+    <span class="n">_logistic_regression_path</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.svm._base</span><span class="w"> </span><span class="kn">import</span> <span class="n">_fit_liblinear</span><span class="p">,</span> <span class="n">_get_liblinear_solver_type</span>
+
+<span class="c1"># 全篇共用的一份二分类数据：300×8，标准化后再交给各 solver</span>
+<span class="n">X</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">make_classification</span><span class="p">(</span><span class="n">n_samples</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span> <span class="n">n_features</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">n_informative</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">Xs</span> <span class="o">=</span> <span class="n">StandardScaler</span><span class="p">()</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+<span class="n">yf</span> <span class="o">=</span> <span class="n">y</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+<span class="n">sw</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
+
+<span class="n">solvers</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="s2">"liblinear"</span><span class="p">,</span> <span class="s2">"newton-cg"</span><span class="p">,</span> <span class="s2">"newton-cholesky"</span><span class="p">,</span> <span class="s2">"sag"</span><span class="p">,</span> <span class="s2">"saga"</span><span class="p">]</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">"数据: X </span><span class="si">%s</span><span class="s2">, Xs </span><span class="si">%s</span><span class="s2">, 正类比例 </span><span class="si">%.2f</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">X</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">Xs</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">y</span><span class="o">.</span><span class="n">mean</span><span class="p">()))</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell-outputWrapper">
+<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
+</div>
+<div class="jp-OutputArea jp-Cell-outputArea">
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>数据: X (300, 8), Xs (300, 8), 正类比例 0.50
+</pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=adb81609">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<h2 id="1.-%E9%80%BB%E8%BE%91%E5%9B%9E%E5%BD%92%E7%9A%84%E6%95%B0%E5%AD%A6%E7%9B%AE%E6%A0%87%E4%B8%8E%E7%AC%A6%E5%8F%B7">1. 逻辑回归的数学目标与符号<a class="anchor-link" href="#1.-%E9%80%BB%E8%BE%91%E5%9B%9E%E5%BD%92%E7%9A%84%E6%95%B0%E5%AD%A6%E7%9B%AE%E6%A0%87%E4%B8%8E%E7%AC%A6%E5%8F%B7">¶</a></h2><p>逻辑回归最小化的是「负对数似然 + 正则」。sklearn 的 <code>C</code> 是正则强度的倒数：<code>C</code> 越大，正则越弱。统一写成一个未归一化目标（以 L2 正则、二分类为例）：</p>
+<p>$$
+J(w, b) = \sum_i s_i \, \ell\left(y_i,\; x_i^\top w + b\right) + \frac{\lVert w \rVert^2}{2C}
+$$</p>
+<p>符号约定：</p>
+<ul>
+<li><code>w</code> 是系数向量，<strong>不含截距</strong>；截距 <code>b</code> 单独列出，默认不进正则。</li>
+<li><code>x_i^\top w + b</code> 就是 <code>decision_function</code> 返回的 <code>d</code>；二分类时 <code>P(y=1 \mid x) = \sigma(d)</code>。</li>
+<li><code>s_i</code> 是 <code>sample_weight_i</code>，<code>\ell</code> 是 log loss，<code>C</code> 是正则强度的倒数（<code>C</code> 越大正则越弱）。</li>
+</ul>
+<p>截距的唯一例外是 liblinear：它把截距做成一个合成特征，与 <code>w</code> 一起被罚（<code>intercept_scaling</code> 只改变这个合成特征的数值）。所以同一份数据、同样的 <code>C</code>，liblinear 优化的目标与其余 solver 并不相同。</p>
+<p>同一个目标进入实现前被改写成三种尺度：</p>
+<table>
+<thead>
+<tr>
+<th>实现</th>
+<th>实际目标</th>
+<th>缩放方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lbfgs</code> / <code>newton-cg</code></td>
+<td><code>LinearModelLoss</code> + <code>l2_reg_strength = 1/C</code></td>
+<td>直接</td>
+</tr>
+<tr>
+<td><code>newton-cholesky</code></td>
+<td>先把 <code>sample_weight</code> 归一到和为 1，再令 <code>l2_reg_strength = 1/(C * sum(sw))</code></td>
+<td>源码注释 <code>nasty matter</code> 指这一步很棘手</td>
+</tr>
+<tr>
+<td><code>sag</code> / <code>saga</code></td>
+<td><code>alpha = 1/C</code>，再 <code>alpha_scaled = alpha / n_samples</code></td>
+<td>因为 SAG 的目标是 <code>(1/n) sum loss</code></td>
+</tr>
+<tr>
+<td><code>liblinear</code></td>
+<td>C++ 内部 <code>0.5‖w‖² + C * sum loss</code></td>
+<td>整体除以 C</td>
+</tr>
+</tbody>
+</table>
+<p><code>penalty=None</code> 不是一条独立的「无正则」分支：<code>fit</code> 把 <code>C_</code> 换成 <code>np.inf</code>，再把 <code>penalty</code> 改回 <code>"l2"</code>。因此 <code>C</code> 被完全忽略，而且<strong>只有 <code>C != 1</code> 时才发警告</strong>。</p>
+<p>liblinear 更特殊：<code>_check_solver</code> 只拦字符串 <code>"none"</code>，<code>None</code> 会一路传到 <code>_get_liblinear_solver_type</code>，最后抛查表式错误。同一个「关正则」，两种写法、两套错误路径。</p>
+<p><code>sample_weight</code> 整体缩放会改变模型：因为权重与 <code>C</code> 在目标函数里是耦合的。把权重全乘 7，等价于把 <code>C</code> 乘 7。</p>
+<p><code>class_weight</code> 的折叠位置取决于入口：dict 形式和 multinomial 在原始标签上算，OvR 则先掩码成二值标签、再算 <code>balanced</code>（源码里两段相邻，下一格一并打印）。</p>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=acdf1f96">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [4]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="cm-editor cm-s-jupyter">
+<div class="highlight hl-ipython3"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model._sag</span><span class="w"> </span><span class="kn">import</span> <span class="n">sag_solver</span>
+
+<span class="n">show_lines</span><span class="p">([</span>
+    <span class="n">find_span</span><span class="p">(</span><span class="s1">'if solver == "newton-cholesky":'</span><span class="p">,</span>
+              <span class="s2">"sample_weight = sample_weight / sw_sum"</span><span class="p">,</span>
+              <span class="n">func</span><span class="o">=</span><span class="n">_logistic_regression_path</span><span class="p">),</span>
+    <span class="n">find_span</span><span class="p">(</span><span class="s2">"l2_reg_strength = 1.0 / C / sw_sum"</span><span class="p">,</span>
+              <span class="s2">"l2_reg_strength = 1.0 / C / sw_sum"</span><span class="p">,</span>
+              <span class="n">func</span><span class="o">=</span><span class="n">_logistic_regression_path</span><span class="p">),</span>
+    <span class="n">find_span</span><span class="p">(</span><span class="s1">'elif solver in ["sag", "saga"]:'</span><span class="p">,</span> <span class="s2">"beta = 0.0"</span><span class="p">,</span>
+              <span class="n">func</span><span class="o">=</span><span class="n">_logistic_regression_path</span><span class="p">),</span>
+    <span class="n">find_span</span><span class="p">(</span><span class="s1">'if self.penalty is None or self.penalty == "none":'</span><span class="p">,</span>
+              <span class="s2">"penalty = self.penalty"</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="n">LogisticRegression</span><span class="o">.</span><span class="n">fit</span><span class="p">),</span>
+    <span class="n">find_span</span><span class="p">(</span><span class="s2">"# If class_weights is a dict (provided by the user)"</span><span class="p">,</span>
+              <span class="s2">"sample_weight *= class_weight_[le.fit_transform(y_bin)]"</span><span class="p">,</span>
+              <span class="n">func</span><span class="o">=</span><span class="n">_logistic_regression_path</span><span class="p">),</span>
+<span class="p">],</span> <span class="n">title</span><span class="o">=</span><span class="s2">"== 目标函数的三种尺度与 class_weight 的位置（行号现场定位）=="</span><span class="p">)</span>
+
+<span class="n">show_file</span><span class="p">(</span><span class="n">inspect</span><span class="o">.</span><span class="n">getsourcefile</span><span class="p">(</span><span class="n">sag_solver</span><span class="p">),</span>
+          <span class="p">[</span><span class="n">find_span</span><span class="p">(</span><span class="s2">"# As in SGD, the alpha is scaled by n_samples."</span><span class="p">,</span>
+                     <span class="s2">"beta_scaled = float(beta) / n_samples"</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="n">sag_solver</span><span class="p">)],</span>
+          <span class="n">title</span><span class="o">=</span><span class="s2">"== SAG 的 alpha 再除以 n_samples（_sag.py）=="</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell-outputWrapper">
+<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
+</div>
+<div class="jp-OutputArea jp-Cell-outputArea">
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>== 目标函数的三种尺度与 class_weight 的位置（行号现场定位）==
+  L300-L315
+ 300|     if solver == "newton-cholesky":
+ 301|         # IMPORTANT NOTE: Rescaling of sample_weight:
+ 302|         # Same as in _GeneralizedLinearRegressor.fit().
+ 303|         # We want to minimize
+ 304|         #     obj = 1/(2*sum(sample_weight)) * sum(sample_weight * deviance)
+ 305|         #         + 1/2 * alpha * L2,
+ 306|         # with
+ 307|         #     deviance = 2 * log_loss.
+ 308|         # The objective is invariant to multiplying sample_weight by a constant. We
+ 309|         # choose this constant such that sum(sample_weight) = 1. Thus, we end up with
+ 310|         #     obj = sum(sample_weight * loss) + 1/2 * alpha * L2.
+ 311|         # Note that LinearModelLoss.loss() computes sum(sample_weight * loss).
+ 312|         #
+ 313|         # This rescaling has to be done before multiplying by class_weights.
+ 314|         sw_sum = sample_weight.sum()  # needed to rescale penalty, nasty matter!
+ 315|         sample_weight = sample_weight / sw_sum
+
+  L476-L476
+ 476|             l2_reg_strength = 1.0 / C / sw_sum
+
+  L516-L528
+ 516|         elif solver in ["sag", "saga"]:
+ 517|             if multi_class == "multinomial":
+ 518|                 target = target.astype(X.dtype, copy=False)
+ 519|                 loss = "multinomial"
+ 520|             else:
+ 521|                 loss = "log"
+ 522|             # alpha is for L2-norm, beta is for L1-norm
+ 523|             if penalty == "l1":
+ 524|                 alpha = 0.0
+ 525|                 beta = 1.0 / C
+ 526|             elif penalty == "l2":
+ 527|                 alpha = 1.0 / C
+ 528|                 beta = 0.0
+
+  L1191-L1201
+1191|         if self.penalty is None or self.penalty == "none":
+1192|             if self.C != 1.0:  # default values
+1193|                 warnings.warn(
+1194|                     "Setting penalty=None will ignore the C and l1_ratio parameters"
+1195|                 )
+1196|                 # Note that check for l1_ratio is done right above
+1197|             C_ = np.inf
+1198|             penalty = "l2"
+1199|         else:
+1200|             C_ = self.C
+1201|             penalty = self.penalty
+
+  L317-L345
+ 317|     # If class_weights is a dict (provided by the user), the weights
+ 318|     # are assigned to the original labels. If it is "balanced", then
+ 319|     # the class_weights are assigned after masking the labels with a OvR.
+ 320|     le = LabelEncoder()
+ 321|     if isinstance(class_weight, dict) or multi_class == "multinomial":
+ 322|         class_weight_ = compute_class_weight(class_weight, classes=classes, y=y)
+ 323|         sample_weight *= class_weight_[le.fit_transform(y)]
+ 324| 
+ 325|     # For doing a ovr, we need to mask the labels first. For the
+ 326|     # multinomial case this is not necessary.
+ 327|     if multi_class == "ovr":
+ 328|         w0 = np.zeros(n_features + int(fit_intercept), dtype=X.dtype)
+ 329|         mask = y == pos_class
+ 330|         y_bin = np.ones(y.shape, dtype=X.dtype)
+ 331|         if solver in ["lbfgs", "newton-cg", "newton-cholesky"]:
+ 332|             # HalfBinomialLoss, used for those solvers, represents y in [0, 1] instead
+ 333|             # of in [-1, 1].
+ 334|             mask_classes = np.array([0, 1])
+ 335|             y_bin[~mask] = 0.0
+ 336|         else:
+ 337|             mask_classes = np.array([-1, 1])
+ 338|             y_bin[~mask] = -1.0
+ 339| 
+ 340|         # for compute_class_weight
+ 341|         if class_weight == "balanced":
+ 342|             class_weight_ = compute_class_weight(
+ 343|                 class_weight, classes=mask_classes, y=y_bin
+ 344|             )
+ 345|             sample_weight *= class_weight_[le.fit_transform(y_bin)]
+
+== SAG 的 alpha 再除以 n_samples（_sag.py）==
+  L255-L257
+ 255|     # As in SGD, the alpha is scaled by n_samples.
+ 256|     alpha_scaled = float(alpha) / n_samples
+ 257|     beta_scaled = float(beta) / n_samples
+
+</pre>
+</div>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=b0f69b6a">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [5]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="cm-editor cm-s-jupyter">
+<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== penalty=None：C 被换成 inf =="</span><span class="p">)</span>
+<span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">(</span><span class="n">record</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">caught</span><span class="p">:</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"always"</span><span class="p">)</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">penalty</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">penalty</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<span class="n">msg</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">caught</span> <span class="k">if</span> <span class="s2">"ignore"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)]</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  C=1 vs C=2 系数逐元素相同 :"</span><span class="p">,</span>
+      <span class="n">np</span><span class="o">.</span><span class="n">array_equal</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">coef_</span><span class="p">)</span> <span class="ow">and</span> <span class="n">np</span><span class="o">.</span><span class="n">array_equal</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">intercept_</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">intercept_</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  C=2 时的警告             :"</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== liblinear 的两种写法 =="</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">pen</span> <span class="ow">in</span> <span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="s2">"none"</span><span class="p">]:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">penalty</span><span class="o">=</span><span class="n">pen</span><span class="p">,</span> <span class="n">solver</span><span class="o">=</span><span class="s2">"liblinear"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"  penalty=</span><span class="si">%-6r</span><span class="s2"> -&gt; </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">pen</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">", Parameters"</span><span class="p">)[</span><span class="mi">0</span><span class="p">]))</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">(</span><span class="n">record</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">caught</span><span class="p">:</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"always"</span><span class="p">)</span>
+    <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">penalty</span><span class="o">=</span><span class="s2">"none"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  字符串 'none' 的额外警告 :"</span><span class="p">,</span>
+      <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">caught</span> <span class="k">if</span> <span class="s2">"deprecated"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)])</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell-outputWrapper">
+<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
+</div>
+<div class="jp-OutputArea jp-Cell-outputArea">
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>== penalty=None：C 被换成 inf ==
+  C=1 vs C=2 系数逐元素相同 : True
+  C=2 时的警告             : ['Setting penalty=None will ignore the C and l1_ratio parameters']
+
+== liblinear 的两种写法 ==
+  penalty=None   -&gt; Unsupported set of arguments: The combination of penalty='None' and loss='logistic_regression' is not supported
+  penalty='none' -&gt; penalty='none' is not supported for the liblinear solver
+
+  字符串 'none' 的额外警告 : ["`penalty='none'`has been deprecated in 1.2 and will be removed in 1.4. To keep the past behaviour, set `penalty=None`."]
+</pre>
+</div>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=7bdc1003">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [6]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="cm-editor cm-s-jupyter">
+<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== sample_weight 整体缩放 =="</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="s2">"newton-cholesky"</span><span class="p">]:</span>
+    <span class="n">m1</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="n">s</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">,</span>
+                            <span class="n">max_iter</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    <span class="n">m7</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="n">s</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span>
+        <span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">sample_weight</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">y</span><span class="p">),</span> <span class="mf">7.0</span><span class="p">))</span>
+    <span class="n">eq</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="n">s</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mf">3.5</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">,</span>
+                            <span class="n">max_iter</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%-15s</span><span class="s2"> 权重乘 7：|dcoef|=</span><span class="si">%.3e</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">m7</span><span class="o">.</span><span class="n">coef_</span> <span class="o">-</span> <span class="n">m1</span><span class="o">.</span><span class="n">coef_</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%-15s</span><span class="s2"> sw=7,C=0.5 vs sw=1,C=3.5：|dcoef|=</span><span class="si">%.3e</span><span class="s2">"</span>
+          <span class="o">%</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">m7</span><span class="o">.</span><span class="n">coef_</span> <span class="o">-</span> <span class="n">eq</span><span class="o">.</span><span class="n">coef_</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell-outputWrapper">
+<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
+</div>
+<div class="jp-OutputArea jp-Cell-outputArea">
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>== sample_weight 整体缩放 ==
+  lbfgs           权重乘 7：|dcoef|=1.228e-01
+  lbfgs           sw=7,C=0.5 vs sw=1,C=3.5：|dcoef|=2.776e-16
+  newton-cholesky 权重乘 7：|dcoef|=1.228e-01
+  newton-cholesky sw=7,C=0.5 vs sw=1,C=3.5：|dcoef|=0.000e+00
+</pre>
+</div>
+</div>
+</div>
+</div>
 </div>
 <div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=fdae3844">
 <div class="jp-Cell-inputWrapper" tabindex="0">
@@ -7695,7 +8051,7 @@ logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linea
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="1.-%E5%85%AD%E4%B8%AA-solver-%E5%AD%97%E7%AC%A6%E4%B8%B2">1. 六个 solver 字符串<a class="anchor-link" href="#1.-%E5%85%AD%E4%B8%AA-solver-%E5%AD%97%E7%AC%A6%E4%B8%B2">¶</a></h2><p><code>_check_solver</code> 只进行合法性检查，在以下两处进行分派：</p>
+<h2 id="2.-%E5%85%AD%E4%B8%AA-solver-%E5%AD%97%E7%AC%A6%E4%B8%B2%E4%B8%8E%E5%88%86%E6%B4%BE">2. 六个 solver 字符串与分派<a class="anchor-link" href="#2.-%E5%85%AD%E4%B8%AA-solver-%E5%AD%97%E7%AC%A6%E4%B8%B2%E4%B8%8E%E5%88%86%E6%B4%BE">¶</a></h2><p><code>_check_solver</code> 只进行合法性检查，在以下两处进行分派：</p>
 <ol>
 <li><strong><code>fit</code> 里 liblinear 直接早退</strong>：<code>solver == "liblinear"</code> 时调用 <code>_fit_liblinear</code> 后立刻 <code>return self</code>，<strong>完全不经过</strong> <code>_logistic_regression_path</code>；</li>
 <li><strong>path 里的四支</strong>：其余五个 solver 在同一个 <code>for C in Cs</code> 循环内分成 <code>lbfgs</code> / <code>newton-cg</code> / <code>newton-cholesky</code> / <code>sag+saga</code> 四支。</li>
@@ -7726,7 +8082,7 @@ logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linea
 <td><code>newton-cg</code></td>
 <td>sklearn 自写 <code>_newton_cg</code></td>
 <td>path</td>
-<td>共轭梯度步数</td>
+<td>外层牛顿迭代数（内层 CG 步不计入）</td>
 </tr>
 <tr>
 <td><code>newton-cholesky</code></td>
@@ -7744,7 +8100,8 @@ logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linea
 </table>
 <p><code>solver</code> 同时决定：<code>penalty</code>、<code>tol</code> 的量纲、<code>n_iter_</code> 的语义、并行方式（进程 / 线程 / 无）。</p>
 <p>path 里其实也有一段 <code>elif solver == "liblinear"</code>，但 <code>LogisticRegression.fit</code> 永远走不到它 —— 它只服务 <code>LogisticRegressionCV</code>（CV 通过 <code>_log_reg_scoring_path</code> 调 path）。</p>
-<p>使用同一份 300×8 二分类数据，设定 <code>tol=1e-6, max_iter=1000</code> 进行测试。六个 solver 的系数差异都在 <code>5.5e-4</code> 以内，但目标函数值不同：liblinear 是 <code>111.928882</code>，其余是 <code>111.928737</code>，<strong>优化精度</strong>有差异。</p>
+<p>使用同一份 300×8 二分类数据，设定 <code>tol=1e-6, max_iter=1000</code> 进行测试。默认设置下，liblinear 与其余 solver 优化的<strong>并不是同一个目标</strong>：liblinear 把截距当成一个合成特征，<strong>照样参与正则</strong>（<code>intercept_scaling</code> 的 docstring 原话：the synthetic feature weight is subject to l1/l2 regularization），而其余 solver 的截距不进正则。所以 <code>111.928882</code> 与 <code>111.928737</code> 的差距不能直接归因于优化精度。</p>
+<p>下面用 <code>fit_intercept=False</code> 做对照：目标函数一致之后，剩下的差异才是优化精度。</p>
 </div>
 </div>
 </div>
@@ -7753,17 +8110,10 @@ logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linea
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [3]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [7]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model._logistic</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-    <span class="n">_check_multi_class</span><span class="p">,</span>
-    <span class="n">_check_solver</span><span class="p">,</span>
-    <span class="n">_logistic_regression_path</span><span class="p">,</span>
-<span class="p">)</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.svm._base</span><span class="w"> </span><span class="kn">import</span> <span class="n">_fit_liblinear</span><span class="p">,</span> <span class="n">_get_liblinear_solver_type</span>
-
-<span class="nb">print</span><span class="p">(</span><span class="s2">"== _logistic_regression_path 的 solver 分支 =="</span><span class="p">)</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== _logistic_regression_path 的 solver 分支 =="</span><span class="p">)</span>
 <span class="n">src</span><span class="p">,</span> <span class="n">start</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getsourcelines</span><span class="p">(</span><span class="n">_logistic_regression_path</span><span class="p">)</span>
 <span class="n">loop</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">src</span><span class="p">)</span> <span class="k">if</span> <span class="s2">"for i, C in enumerate(Cs):"</span> <span class="ow">in</span> <span class="n">l</span><span class="p">)</span>
 <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">src</span><span class="p">):</span>
@@ -7822,23 +8172,10 @@ logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linea
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [4]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [8]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
-
-<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.datasets</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_classification</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model._linear_loss</span><span class="w"> </span><span class="kn">import</span> <span class="n">LinearModelLoss</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn._loss.loss</span><span class="w"> </span><span class="kn">import</span> <span class="n">HalfBinomialLoss</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.preprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="n">StandardScaler</span>
-
-<span class="n">X</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">make_classification</span><span class="p">(</span><span class="n">n_samples</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span> <span class="n">n_features</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">n_informative</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-<span class="n">Xs</span> <span class="o">=</span> <span class="n">StandardScaler</span><span class="p">()</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
-<span class="n">yf</span> <span class="o">=</span> <span class="n">y</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
-<span class="n">sw</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
-
-<span class="n">solvers</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="s2">"liblinear"</span><span class="p">,</span> <span class="s2">"newton-cg"</span><span class="p">,</span> <span class="s2">"newton-cholesky"</span><span class="p">,</span> <span class="s2">"sag"</span><span class="p">,</span> <span class="s2">"saga"</span><span class="p">]</span>
-<span class="n">loss</span> <span class="o">=</span> <span class="n">LinearModelLoss</span><span class="p">(</span><span class="n">base_loss</span><span class="o">=</span><span class="n">HalfBinomialLoss</span><span class="p">(),</span> <span class="n">fit_intercept</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="n">loss</span> <span class="o">=</span> <span class="n">LinearModelLoss</span><span class="p">(</span><span class="n">base_loss</span><span class="o">=</span><span class="n">HalfBinomialLoss</span><span class="p">(),</span> <span class="n">fit_intercept</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 
 <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="si">%-15s</span><span class="s2"> </span><span class="si">%-11s</span><span class="s2"> </span><span class="si">%10s</span><span class="s2"> </span><span class="si">%14s</span><span class="s2"> </span><span class="si">%6s</span><span class="s2">"</span>
       <span class="o">%</span> <span class="p">(</span><span class="s2">"solver"</span><span class="p">,</span> <span class="s2">"n_iter_"</span><span class="p">,</span> <span class="s2">"|dcoef|"</span><span class="p">,</span> <span class="s2">"objective"</span><span class="p">,</span> <span class="s2">"warn"</span><span class="p">))</span>
@@ -7852,6 +8189,23 @@ logistic : /root/MSA/ENTER/envs/vmunet/lib/python3.8/site-packages/sklearn/linea
         <span class="n">base</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">coef_</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
     <span class="n">w</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">m</span><span class="o">.</span><span class="n">coef_</span><span class="o">.</span><span class="n">ravel</span><span class="p">(),</span> <span class="n">m</span><span class="o">.</span><span class="n">intercept_</span><span class="p">])</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
     <span class="n">obj</span> <span class="o">=</span> <span class="n">loss</span><span class="o">.</span><span class="n">loss</span><span class="p">(</span><span class="n">w</span><span class="p">,</span> <span class="n">Xs</span><span class="p">,</span> <span class="n">yf</span><span class="p">,</span> <span class="n">sample_weight</span><span class="o">=</span><span class="n">sw</span><span class="p">,</span> <span class="n">l2_reg_strength</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="si">%-15s</span><span class="s2"> </span><span class="si">%-11s</span><span class="s2"> </span><span class="si">%10.2e</span><span class="s2"> </span><span class="si">%14.9f</span><span class="s2"> </span><span class="si">%6d</span><span class="s2">"</span>
+          <span class="o">%</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">tolist</span><span class="p">()),</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">coef_</span> <span class="o">-</span> <span class="n">base</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span>
+             <span class="n">obj</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">caught</span><span class="p">)))</span>
+
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="si">%-15s</span><span class="s2"> </span><span class="si">%-11s</span><span class="s2"> </span><span class="si">%10s</span><span class="s2"> </span><span class="si">%14s</span><span class="s2"> </span><span class="si">%6s</span><span class="s2">"</span>
+      <span class="o">%</span> <span class="p">(</span><span class="s2">"solver(no intercept)"</span><span class="p">,</span> <span class="s2">"n_iter_"</span><span class="p">,</span> <span class="s2">"|dcoef|"</span><span class="p">,</span> <span class="s2">"objective"</span><span class="p">,</span> <span class="s2">"warn"</span><span class="p">))</span>
+<span class="n">loss_nb</span> <span class="o">=</span> <span class="n">LinearModelLoss</span><span class="p">(</span><span class="n">base_loss</span><span class="o">=</span><span class="n">HalfBinomialLoss</span><span class="p">(),</span> <span class="n">fit_intercept</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">base</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">solvers</span><span class="p">:</span>
+    <span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">(</span><span class="n">record</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">caught</span><span class="p">:</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"always"</span><span class="p">)</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="n">s</span><span class="p">,</span> <span class="n">fit_intercept</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span>
+                               <span class="n">max_iter</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">base</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">base</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">coef_</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">obj</span> <span class="o">=</span> <span class="n">loss_nb</span><span class="o">.</span><span class="n">loss</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">coef_</span><span class="o">.</span><span class="n">ravel</span><span class="p">(),</span> <span class="n">Xs</span><span class="p">,</span> <span class="n">yf</span><span class="p">,</span> <span class="n">sample_weight</span><span class="o">=</span><span class="n">sw</span><span class="p">,</span> <span class="n">l2_reg_strength</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
     <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="si">%-15s</span><span class="s2"> </span><span class="si">%-11s</span><span class="s2"> </span><span class="si">%10.2e</span><span class="s2"> </span><span class="si">%14.9f</span><span class="s2"> </span><span class="si">%6d</span><span class="s2">"</span>
           <span class="o">%</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">tolist</span><span class="p">()),</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">coef_</span> <span class="o">-</span> <span class="n">base</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span>
              <span class="n">obj</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">caught</span><span class="p">)))</span>
@@ -7874,235 +8228,14 @@ newton-cg       [10]          2.42e-05  111.928737089      0
 newton-cholesky [5]           2.57e-05  111.928737089      0
 sag             [36]          2.43e-05  111.928737089      0
 saga            [22]          2.30e-05  111.928737089      0
-</pre>
-</div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=adb81609">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="2.-C%E3%80%81penalty=None%E3%80%81sample_weight%EF%BC%9A%E5%90%8C%E4%B8%80%E4%B8%AA%E7%9B%AE%E6%A0%87%E5%87%BD%E6%95%B0%E7%9A%84%E4%B8%89%E7%A7%8D%E5%B0%BA%E5%BA%A6">2. <code>C</code>、<code>penalty=None</code>、<code>sample_weight</code>：同一个目标函数的三种尺度<a class="anchor-link" href="#2.-C%E3%80%81penalty=None%E3%80%81sample_weight%EF%BC%9A%E5%90%8C%E4%B8%80%E4%B8%AA%E7%9B%AE%E6%A0%87%E5%87%BD%E6%95%B0%E7%9A%84%E4%B8%89%E7%A7%8D%E5%B0%BA%E5%BA%A6">¶</a></h2><p>统一写成一个未归一化目标：</p>
-<div class="highlight"><pre><span></span>sum_i sample_weight_i * loss_i(w) + ‖w‖² / (2C)
-</pre></div>
-<p>但进入具体实现前，这个式子被改写成了三种不同尺度：</p>
-<table>
-<thead>
-<tr>
-<th>实现</th>
-<th>实际目标</th>
-<th>缩放方式</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>lbfgs</code> / <code>newton-cg</code></td>
-<td><code>LinearModelLoss</code> + <code>l2_reg_strength = 1/C</code></td>
-<td>直接</td>
-</tr>
-<tr>
-<td><code>newton-cholesky</code></td>
-<td>先把 <code>sample_weight</code> 归一到和为 1，再令 <code>l2_reg_strength = 1/(C * sum(sw))</code></td>
-<td>源码注释原话 <code>nasty matter</code></td>
-</tr>
-<tr>
-<td><code>sag</code> / <code>saga</code></td>
-<td><code>alpha = 1/C</code>，再 <code>alpha_scaled = alpha / n_samples</code></td>
-<td>因为 SAG 的目标是 <code>(1/n) sum loss</code></td>
-</tr>
-<tr>
-<td><code>liblinear</code></td>
-<td>C++ 内部 <code>0.5‖w‖² + C * sum loss</code></td>
-<td>整体除以 C</td>
-</tr>
-</tbody>
-</table>
-<p><code>penalty=None</code> 不是一条独立的「无正则」分支：<code>fit</code> 把 <code>C_</code> 换成 <code>np.inf</code>，再把 <code>penalty</code> 改回 <code>"l2"</code>。因此 <code>C</code> 被完全忽略，而且<strong>只有 <code>C != 1</code> 时才发警告</strong>。</p>
-<p>liblinear 更特殊：<code>_check_solver</code> 只拦字符串 <code>"none"</code>，<code>None</code> 会一路传到 <code>_get_liblinear_solver_type</code>，最后抛查表式错误。同一个「关正则」，两种写法、两套错误路径。</p>
-<p><code>sample_weight</code> 整体缩放会改变模型：因为权重与 <code>C</code> 在目标函数里是耦合的。把权重全乘 7，等价于把 <code>C</code> 乘 7。</p>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=acdf1f96">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [5]:</div>
-<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model._sag</span><span class="w"> </span><span class="kn">import</span> <span class="n">sag_solver</span>
 
-<span class="n">show_lines</span><span class="p">([(</span><span class="mi">300</span><span class="p">,</span> <span class="mi">315</span><span class="p">),</span> <span class="p">(</span><span class="mi">476</span><span class="p">,</span> <span class="mi">476</span><span class="p">),</span> <span class="p">(</span><span class="mi">522</span><span class="p">,</span> <span class="mi">528</span><span class="p">),</span> <span class="p">(</span><span class="mi">1191</span><span class="p">,</span> <span class="mi">1201</span><span class="p">)],</span>
-           <span class="n">title</span><span class="o">=</span><span class="s2">"== 目标函数的三种尺度（_logistic.py）=="</span><span class="p">)</span>
-<span class="n">show_file</span><span class="p">(</span><span class="n">inspect</span><span class="o">.</span><span class="n">getsourcefile</span><span class="p">(</span><span class="n">sag_solver</span><span class="p">),</span> <span class="p">[(</span><span class="mi">254</span><span class="p">,</span> <span class="mi">257</span><span class="p">)],</span>
-          <span class="n">title</span><span class="o">=</span><span class="s2">"== SAG 的 alpha 再除以 n_samples（_sag.py）=="</span><span class="p">)</span>
-</pre></div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell-outputWrapper">
-<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
-</div>
-<div class="jp-OutputArea jp-Cell-outputArea">
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>== 目标函数的三种尺度（_logistic.py）==
-  L300-L315
- 300|     if solver == "newton-cholesky":
- 301|         # IMPORTANT NOTE: Rescaling of sample_weight:
- 302|         # Same as in _GeneralizedLinearRegressor.fit().
- 303|         # We want to minimize
- 304|         #     obj = 1/(2*sum(sample_weight)) * sum(sample_weight * deviance)
- 305|         #         + 1/2 * alpha * L2,
- 306|         # with
- 307|         #     deviance = 2 * log_loss.
- 308|         # The objective is invariant to multiplying sample_weight by a constant. We
- 309|         # choose this constant such that sum(sample_weight) = 1. Thus, we end up with
- 310|         #     obj = sum(sample_weight * loss) + 1/2 * alpha * L2.
- 311|         # Note that LinearModelLoss.loss() computes sum(sample_weight * loss).
- 312|         #
- 313|         # This rescaling has to be done before multiplying by class_weights.
- 314|         sw_sum = sample_weight.sum()  # needed to rescale penalty, nasty matter!
- 315|         sample_weight = sample_weight / sw_sum
-
-  L476-L476
- 476|             l2_reg_strength = 1.0 / C / sw_sum
-
-  L522-L528
- 522|             # alpha is for L2-norm, beta is for L1-norm
- 523|             if penalty == "l1":
- 524|                 alpha = 0.0
- 525|                 beta = 1.0 / C
- 526|             elif penalty == "l2":
- 527|                 alpha = 1.0 / C
- 528|                 beta = 0.0
-
-  L1191-L1201
-1191|         if self.penalty is None or self.penalty == "none":
-1192|             if self.C != 1.0:  # default values
-1193|                 warnings.warn(
-1194|                     "Setting penalty=None will ignore the C and l1_ratio parameters"
-1195|                 )
-1196|                 # Note that check for l1_ratio is done right above
-1197|             C_ = np.inf
-1198|             penalty = "l2"
-1199|         else:
-1200|             C_ = self.C
-1201|             penalty = self.penalty
-
-== SAG 的 alpha 再除以 n_samples（_sag.py）==
-  L254-L257
- 254|     n_samples, n_features = X.shape[0], X.shape[1]
- 255|     # As in SGD, the alpha is scaled by n_samples.
- 256|     alpha_scaled = float(alpha) / n_samples
- 257|     beta_scaled = float(beta) / n_samples
-
-</pre>
-</div>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=b0f69b6a">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [6]:</div>
-<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== penalty=None：C 被换成 inf =="</span><span class="p">)</span>
-<span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">(</span><span class="n">record</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">caught</span><span class="p">:</span>
-    <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"always"</span><span class="p">)</span>
-    <span class="n">a</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">penalty</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-    <span class="n">b</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">penalty</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="n">msg</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">caught</span> <span class="k">if</span> <span class="s2">"ignore"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)]</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  C=1 vs C=2 系数逐元素相同 :"</span><span class="p">,</span>
-      <span class="n">np</span><span class="o">.</span><span class="n">array_equal</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">coef_</span><span class="p">)</span> <span class="ow">and</span> <span class="n">np</span><span class="o">.</span><span class="n">array_equal</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">intercept_</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">intercept_</span><span class="p">))</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  C=2 时的警告             :"</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">()</span>
-
-<span class="nb">print</span><span class="p">(</span><span class="s2">"== liblinear 的两种写法 =="</span><span class="p">)</span>
-<span class="k">for</span> <span class="n">pen</span> <span class="ow">in</span> <span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="s2">"none"</span><span class="p">]:</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">penalty</span><span class="o">=</span><span class="n">pen</span><span class="p">,</span> <span class="n">solver</span><span class="o">=</span><span class="s2">"liblinear"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-    <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-        <span class="nb">print</span><span class="p">(</span><span class="s2">"  penalty=</span><span class="si">%-6r</span><span class="s2"> -&gt; </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">pen</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">", Parameters"</span><span class="p">)[</span><span class="mi">0</span><span class="p">]))</span>
-<span class="nb">print</span><span class="p">()</span>
-
-<span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">(</span><span class="n">record</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">caught</span><span class="p">:</span>
-    <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"always"</span><span class="p">)</span>
-    <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">penalty</span><span class="o">=</span><span class="s2">"none"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  字符串 'none' 的额外警告 :"</span><span class="p">,</span>
-      <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">caught</span> <span class="k">if</span> <span class="s2">"deprecated"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)])</span>
-</pre></div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell-outputWrapper">
-<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
-</div>
-<div class="jp-OutputArea jp-Cell-outputArea">
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>== penalty=None：C 被换成 inf ==
-  C=1 vs C=2 系数逐元素相同 : True
-  C=2 时的警告             : ['Setting penalty=None will ignore the C and l1_ratio parameters']
-
-== liblinear 的两种写法 ==
-  penalty=None   -&gt; Unsupported set of arguments: The combination of penalty='None' and loss='logistic_regression' is not supported
-  penalty='none' -&gt; penalty='none' is not supported for the liblinear solver
-
-  字符串 'none' 的额外警告 : ["`penalty='none'`has been deprecated in 1.2 and will be removed in 1.4. To keep the past behaviour, set `penalty=None`."]
-</pre>
-</div>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=7bdc1003">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [7]:</div>
-<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== sample_weight 整体缩放 =="</span><span class="p">)</span>
-<span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="s2">"newton-cholesky"</span><span class="p">]:</span>
-    <span class="n">m1</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="n">s</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">,</span>
-                            <span class="n">max_iter</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-    <span class="n">m7</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="n">s</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span>
-        <span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">sample_weight</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">y</span><span class="p">),</span> <span class="mf">7.0</span><span class="p">))</span>
-    <span class="n">eq</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="n">s</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mf">3.5</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">,</span>
-                            <span class="n">max_iter</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%-15s</span><span class="s2"> 权重乘 7：|dcoef|=</span><span class="si">%.3e</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">m7</span><span class="o">.</span><span class="n">coef_</span> <span class="o">-</span> <span class="n">m1</span><span class="o">.</span><span class="n">coef_</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%-15s</span><span class="s2"> sw=7,C=0.5 vs sw=1,C=3.5：|dcoef|=</span><span class="si">%.3e</span><span class="s2">"</span>
-          <span class="o">%</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">m7</span><span class="o">.</span><span class="n">coef_</span> <span class="o">-</span> <span class="n">eq</span><span class="o">.</span><span class="n">coef_</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
-</pre></div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell-outputWrapper">
-<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
-</div>
-<div class="jp-OutputArea jp-Cell-outputArea">
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>== sample_weight 整体缩放 ==
-  lbfgs           权重乘 7：|dcoef|=1.228e-01
-  lbfgs           sw=7,C=0.5 vs sw=1,C=3.5：|dcoef|=2.776e-16
-  newton-cholesky 权重乘 7：|dcoef|=1.228e-01
-  newton-cholesky sw=7,C=0.5 vs sw=1,C=3.5：|dcoef|=0.000e+00
+solver(no intercept) n_iter_        |dcoef|      objective   warn
+lbfgs           [10]          0.00e+00  112.111494174      0
+liblinear       [7]           4.37e-06  112.111494173      0
+newton-cg       [10]          4.13e-06  112.111494173      0
+newton-cholesky [5]           4.24e-06  112.111494173      0
+sag             [37]          4.14e-06  112.111494173      0
+saga            [22]          4.82e-06  112.111494173      0
 </pre>
 </div>
 </div>
@@ -8118,7 +8251,7 @@ saga            [22]          2.30e-05  111.928737089      0
 <h2 id="3.-n_iter_-%E6%9C%89%E5%9B%9B%E7%A7%8D%E5%90%AB%E4%B9%89%EF%BC%8C%E8%80%8C%E4%B8%94-docstring-%E5%AF%B9-liblinear-%E5%86%99%E9%94%99%E4%BA%86">3. <code>n_iter_</code> 有四种含义，而且 docstring 对 liblinear 写错了<a class="anchor-link" href="#3.-n_iter_-%E6%9C%89%E5%9B%9B%E7%A7%8D%E5%90%AB%E4%B9%89%EF%BC%8C%E8%80%8C%E4%B8%94-docstring-%E5%AF%B9-liblinear-%E5%86%99%E9%94%99%E4%BA%86">¶</a></h2><p><code>fit</code> 把各路径的计数统一成 <code>np.int32</code> 数组（liblinear 由 C++ 返回，其余由 <code>_logistic_regression_path</code> 汇总），但里面装的是四种不同量纲：</p>
 <ul>
 <li><code>lbfgs</code>：L-BFGS 迭代数；</li>
-<li><code>newton-cg</code>：共轭梯度步数；</li>
+<li><code>newton-cg</code>：外层牛顿迭代数（内层 CG 步不计入）；</li>
 <li><code>newton-cholesky</code>：牛顿迭代数；</li>
 <li><code>sag</code> / <code>saga</code>：整轮 epoch；</li>
 <li><code>liblinear</code>：坐标下降轮数。</li>
@@ -8133,7 +8266,7 @@ saga            [22]          2.30e-05  111.928737089      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [8]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [9]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="n">doc_lines</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getdoc</span><span class="p">(</span><span class="n">LogisticRegression</span><span class="p">)</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span>
@@ -8173,7 +8306,7 @@ saga            [22]          2.30e-05  111.928737089      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [9]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [10]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.datasets</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_digits</span>
@@ -8197,6 +8330,10 @@ saga            [22]          2.30e-05  111.928737089      0
           <span class="o">%</span> <span class="p">(</span><span class="n">kw</span><span class="p">[</span><span class="s2">"solver"</span><span class="p">],</span> <span class="n">kw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"multi_class"</span><span class="p">,</span> <span class="s2">"auto"</span><span class="p">),</span> <span class="n">m</span><span class="o">.</span><span class="n">coef_</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span>
              <span class="n">m</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">sum</span><span class="p">(),</span> <span class="nb">len</span><span class="p">(</span><span class="n">caught</span><span class="p">)))</span>
     <span class="nb">print</span><span class="p">(</span><span class="s2">"      n_iter_ ="</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="s2">" dtype:"</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">caught</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"      警告: </span><span class="si">%s</span><span class="s2"> | </span><span class="si">%s</span><span class="s2">"</span>
+              <span class="o">%</span> <span class="p">(</span><span class="n">caught</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">category</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span>
+                 <span class="s2">" "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">caught</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">message</span><span class="p">)</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[:</span><span class="mi">2</span><span class="p">])))</span>
 </pre></div>
 </div>
 </div>
@@ -8220,6 +8357,7 @@ saga            [22]          2.30e-05  111.928737089      0
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>  lbfgs          multi_class=ovr          coef_=(10, 64)  n_iter_ 形状=(10,)  总和=2707  warn=6
       n_iter_ = [152, 300, 213, 300, 262, 300, 280, 300, 300, 300]  dtype: int32
+      警告: ConvergenceWarning | lbfgs failed to converge (status=1): STOP: TOTAL NO. of ITERATIONS REACHED LIMIT.
 </pre>
 </div>
 </div>
@@ -8228,6 +8366,7 @@ saga            [22]          2.30e-05  111.928737089      0
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>  lbfgs          multi_class=multinomial  coef_=(10, 64)  n_iter_ 形状=(1,)   总和= 300  warn=1
       n_iter_ = [300]  dtype: int32
+      警告: ConvergenceWarning | lbfgs failed to converge (status=1): STOP: TOTAL NO. of ITERATIONS REACHED LIMIT.
   liblinear      multi_class=auto         coef_=(10, 64)  n_iter_ 形状=(10,)  总和= 130  warn=0
       n_iter_ = [11, 14, 12, 13, 12, 13, 12, 12, 17, 14]  dtype: int32
 </pre>
@@ -8291,11 +8430,17 @@ saga            [22]          2.30e-05  111.928737089      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [10]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [11]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="n">show_lines</span><span class="p">([(</span><span class="mi">78</span><span class="p">,</span> <span class="mi">93</span><span class="p">),</span> <span class="p">(</span><span class="mi">1273</span><span class="p">,</span> <span class="mi">1278</span><span class="p">),</span> <span class="p">(</span><span class="mi">1280</span><span class="p">,</span> <span class="mi">1288</span><span class="p">)],</span>
-           <span class="n">title</span><span class="o">=</span><span class="s2">"== 多分类能力表与 joblib hack =="</span><span class="p">)</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="n">show_lines</span><span class="p">([</span>
+    <span class="n">find_span</span><span class="p">(</span><span class="s2">"def _check_multi_class"</span><span class="p">,</span> <span class="s2">"return multi_class"</span><span class="p">,</span>
+              <span class="n">func</span><span class="o">=</span><span class="n">_check_multi_class</span><span class="p">),</span>
+    <span class="n">find_span</span><span class="p">(</span><span class="s2">"# Hack so that we iterate only once for the multinomial case."</span><span class="p">,</span>
+              <span class="s2">"warm_start_coef = [None] * n_classes"</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="n">LogisticRegression</span><span class="o">.</span><span class="n">fit</span><span class="p">),</span>
+    <span class="n">find_span</span><span class="p">(</span><span class="s2">"path_func = delayed(_logistic_regression_path)"</span><span class="p">,</span>
+              <span class="s1">'prefer = "processes"'</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="n">LogisticRegression</span><span class="o">.</span><span class="n">fit</span><span class="p">),</span>
+<span class="p">],</span> <span class="n">title</span><span class="o">=</span><span class="s2">"== 多分类能力表与 joblib hack（行号现场定位）=="</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -8308,7 +8453,7 @@ saga            [22]          2.30e-05  111.928737089      0
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>== 多分类能力表与 joblib hack ==
+<pre>== 多分类能力表与 joblib hack（行号现场定位）==
   L78-L93
   78| def _check_multi_class(multi_class, solver, n_classes):
   79|     """Computes the multi class type, either "multinomial" or "ovr".
@@ -8335,7 +8480,7 @@ saga            [22]          2.30e-05  111.928737089      0
 1277|         if warm_start_coef is None:
 1278|             warm_start_coef = [None] * n_classes
 
-  L1280-L1288
+  L1280-L1287
 1280|         path_func = delayed(_logistic_regression_path)
 1281| 
 1282|         # The SAG solver releases the GIL so it's more efficient to use
@@ -8344,7 +8489,6 @@ saga            [22]          2.30e-05  111.928737089      0
 1285|             prefer = "threads"
 1286|         else:
 1287|             prefer = "processes"
-1288| 
 
 </pre>
 </div>
@@ -8356,12 +8500,12 @@ saga            [22]          2.30e-05  111.928737089      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [11]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [12]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== digits：三条多分类路径 =="</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="si">%-11s</span><span class="s2"> </span><span class="si">%-14s</span><span class="s2"> </span><span class="si">%-10s</span><span class="s2"> </span><span class="si">%-13s</span><span class="s2"> </span><span class="si">%8s</span><span class="s2"> </span><span class="si">%6s</span><span class="s2">"</span>
-      <span class="o">%</span> <span class="p">(</span><span class="s2">"solver"</span><span class="p">,</span> <span class="s2">"multi_class"</span><span class="p">,</span> <span class="s2">"coef_"</span><span class="p">,</span> <span class="s2">"n_iter_ 形状"</span><span class="p">,</span> <span class="s2">"acc"</span><span class="p">,</span> <span class="s2">"warn"</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="si">%-11s</span><span class="s2"> </span><span class="si">%-14s</span><span class="s2"> </span><span class="si">%-10s</span><span class="s2"> </span><span class="si">%-13s</span><span class="s2"> </span><span class="si">%10s</span><span class="s2"> </span><span class="si">%6s</span><span class="s2">"</span>
+      <span class="o">%</span> <span class="p">(</span><span class="s2">"solver"</span><span class="p">,</span> <span class="s2">"multi_class"</span><span class="p">,</span> <span class="s2">"coef_"</span><span class="p">,</span> <span class="s2">"n_iter_ 形状"</span><span class="p">,</span> <span class="s2">"train_acc"</span><span class="p">,</span> <span class="s2">"warn"</span><span class="p">))</span>
 <span class="n">fitted</span> <span class="o">=</span> <span class="p">[]</span>
 <span class="k">for</span> <span class="n">solver</span><span class="p">,</span> <span class="n">mc</span> <span class="ow">in</span> <span class="p">[(</span><span class="s2">"liblinear"</span><span class="p">,</span> <span class="s2">"auto"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="s2">"ovr"</span><span class="p">),</span>
                    <span class="p">(</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="s2">"multinomial"</span><span class="p">)]:</span>
@@ -8370,10 +8514,11 @@ saga            [22]          2.30e-05  111.928737089      0
         <span class="n">m</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="n">solver</span><span class="p">,</span> <span class="n">multi_class</span><span class="o">=</span><span class="n">mc</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span>
                                <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xdig</span><span class="p">,</span> <span class="n">ydig</span><span class="p">)</span>
     <span class="n">fitted</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">solver</span><span class="p">,</span> <span class="n">mc</span><span class="p">,</span> <span class="n">m</span><span class="p">))</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="si">%-11s</span><span class="s2"> </span><span class="si">%-14s</span><span class="s2"> </span><span class="si">%-10s</span><span class="s2"> </span><span class="si">%-13s</span><span class="s2"> </span><span class="si">%8.4f</span><span class="s2"> </span><span class="si">%6d</span><span class="s2">"</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="si">%-11s</span><span class="s2"> </span><span class="si">%-14s</span><span class="s2"> </span><span class="si">%-10s</span><span class="s2"> </span><span class="si">%-13s</span><span class="s2"> </span><span class="si">%10.4f</span><span class="s2"> </span><span class="si">%6d</span><span class="s2">"</span>
           <span class="o">%</span> <span class="p">(</span><span class="n">solver</span><span class="p">,</span> <span class="n">mc</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">coef_</span><span class="o">.</span><span class="n">shape</span><span class="p">),</span> <span class="nb">str</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">shape</span><span class="p">),</span>
              <span class="n">m</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">Xdig</span><span class="p">,</span> <span class="n">ydig</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">caught</span><span class="p">)))</span>
     <span class="nb">print</span><span class="p">(</span><span class="s2">"    n_iter_ ="</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">tolist</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  train_acc = 训练集准确率（score 在训练数据上），不代表泛化精度"</span><span class="p">)</span>
 
 <span class="nb">print</span><span class="p">()</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"== 预测输出的行和 =="</span><span class="p">)</span>
@@ -8393,8 +8538,8 @@ saga            [22]          2.30e-05  111.928737089      0
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>== digits：三条多分类路径 ==
-solver      multi_class    coef_      n_iter_ 形状         acc   warn
-liblinear   auto           (10, 64)   (10,)           0.9933      0
+solver      multi_class    coef_      n_iter_ 形状     train_acc   warn
+liblinear   auto           (10, 64)   (10,)             0.9933      0
     n_iter_ = [11, 14, 12, 13, 12, 13, 12, 12, 17, 14]
 </pre>
 </div>
@@ -8402,7 +8547,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>lbfgs       ovr            (10, 64)   (10,)           0.9978      6
+<pre>lbfgs       ovr            (10, 64)   (10,)             0.9978      6
     n_iter_ = [152, 300, 213, 300, 262, 300, 280, 300, 300, 300]
 </pre>
 </div>
@@ -8410,8 +8555,9 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>lbfgs       multinomial    (10, 64)   (1,)            1.0000      1
+<pre>lbfgs       multinomial    (10, 64)   (1,)              1.0000      1
     n_iter_ = [300]
+  train_acc = 训练集准确率（score 在训练数据上），不代表泛化精度
 
 == 预测输出的行和 ==
   liblinear   auto           [1. 1. 1.]
@@ -8427,7 +8573,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [12]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [13]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== 不支持的实现组合 =="</span><span class="p">)</span>
@@ -8469,7 +8615,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="5.-%E4%BA%8C%E5%88%86%E7%B1%BB-multinomial-%E5%8F%AA%E4%BF%9D%E5%AD%98%E4%B8%80%E8%A1%8C%E7%B3%BB%E6%95%B0%EF%BC%9A%E5%8D%8A%E5%8F%82%E6%95%B0%E5%8C%96">5. 二分类 multinomial 只保存一行系数：半参数化<a class="anchor-link" href="#5.-%E4%BA%8C%E5%88%86%E7%B1%BB-multinomial-%E5%8F%AA%E4%BF%9D%E5%AD%98%E4%B8%80%E8%A1%8C%E7%B3%BB%E6%95%B0%EF%BC%9A%E5%8D%8A%E5%8F%82%E6%95%B0%E5%8C%96">¶</a></h2><p>softmax 对「所有类分数加同一常数」不变，所以 K 类问题的参数只有 K−1 组可辨识。sklearn 的规范是：<strong>第 0 类分数恒为 0</strong>，只保存第 1 行。</p>
+<h2 id="5.-%E4%BA%8C%E5%88%86%E7%B1%BB-multinomial-%E5%8F%AA%E4%BF%9D%E5%AD%98%E4%B8%80%E8%A1%8C%E7%B3%BB%E6%95%B0%EF%BC%9A%E5%8D%8A%E5%8F%82%E6%95%B0%E5%8C%96">5. 二分类 multinomial 只保存一行系数：半参数化<a class="anchor-link" href="#5.-%E4%BA%8C%E5%88%86%E7%B1%BB-multinomial-%E5%8F%AA%E4%BF%9D%E5%AD%98%E4%B8%80%E8%A1%8C%E7%B3%BB%E6%95%B0%EF%BC%9A%E5%8D%8A%E5%8F%82%E6%95%B0%E5%8C%96">¶</a></h2><p>softmax 对「所有类分数加同一常数」不变，所以 K 类问题的参数只有 K−1 组可辨识。sklearn 只保存第 1 行系数 <code>w</code>，预测时把决策值 <code>d = xᵀw + b</code> 镜像成两类分数 <code>[-d, d]</code>，于是 <code>P(y=1|x) = σ(2d)</code>。若改写成「第 0 类分数为 0」的等价形式，两类分数应是 <code>[0, 2d]</code>（两者相差常数 <code>d</code>），<strong>不是</strong> <code>[0, d]</code>。</p>
 <p><code>_logistic_regression_path</code> 在 multinomial 且 <code>n_classes == 2</code> 时执行：</p>
 <div class="highlight"><pre><span></span><span class="n">multi_w0</span> <span class="o">=</span> <span class="n">multi_w0</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
 </pre></div>
@@ -8477,7 +8623,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="highlight"><pre><span></span><span class="n">decision_2d</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">c_</span><span class="p">[</span><span class="o">-</span><span class="n">decision</span><span class="p">,</span> <span class="n">decision</span><span class="p">]</span>
 <span class="n">softmax</span><span class="p">(</span><span class="n">decision_2d</span><span class="p">)</span>
 </pre></div>
-<p>因此 <code>coef_.shape == (1, n_features)</code>，<code>decision_function</code> 返回 1D —— 形状与 OvR 完全一样，但两个模型的系数不可比，因为它们优化的是不同损失（OvR 是 logistic，multinomial 是 softmax 交叉熵）。</p>
+<p>因此 <code>coef_.shape == (1, n_features)</code>，<code>decision_function</code> 返回 1D —— 形状与 OvR 完全一样，但两组系数不能直接比较：二分类的 softmax 交叉熵与 logistic loss 数学上等价，只差 margin 的尺度（<code>±d</code> 对 <code>d</code>），所以在同一个 <code>C</code> 下正则的相对强度不同，系数会整体缩放。</p>
 </div>
 </div>
 </div>
@@ -8486,7 +8632,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [13]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [14]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">scipy.special</span><span class="w"> </span><span class="kn">import</span> <span class="n">expit</span>
@@ -8509,12 +8655,12 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <span class="n">p</span> <span class="o">=</span> <span class="n">mul</span><span class="o">.</span><span class="n">predict_proba</span><span class="p">(</span><span class="n">Xs</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  expit(2d) == predict_proba[:, 1]:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">expit</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">d</span><span class="p">),</span> <span class="n">p</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]))</span>
 
-<span class="n">w</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">mul</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">mul</span><span class="o">.</span><span class="n">intercept_</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-<span class="n">two_row</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">w</span><span class="p">),</span> <span class="n">w</span><span class="p">])</span>          <span class="c1"># 第 0 类固定为 0</span>
-<span class="n">scores</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">c_</span><span class="p">[</span><span class="o">-</span><span class="p">(</span><span class="n">Xs</span> <span class="o">@</span> <span class="n">w</span> <span class="o">+</span> <span class="n">b</span><span class="p">),</span> <span class="n">Xs</span> <span class="o">@</span> <span class="n">w</span> <span class="o">+</span> <span class="n">b</span><span class="p">]</span>
-<span class="n">p2</span> <span class="o">=</span> <span class="n">softmax</span><span class="p">(</span><span class="n">scores</span><span class="p">)</span>                                <span class="c1"># 与源码 predict_proba 同一做法</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  手工两行系数 + softmax 与 predict_proba 一致:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">p2</span><span class="p">,</span> <span class="n">p</span><span class="p">))</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  第一行系数全为 0:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">two_row</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">))</span>
+<span class="n">scores</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">c_</span><span class="p">[</span><span class="o">-</span><span class="n">d</span><span class="p">,</span> <span class="n">d</span><span class="p">]</span>
+<span class="n">scores_shift</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">c_</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">d</span><span class="p">),</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">d</span><span class="p">]</span>      <span class="c1"># 等价规范：第 0 类固定为 0</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  softmax([-d, d]) 与 predict_proba 一致:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">softmax</span><span class="p">(</span><span class="n">scores</span><span class="p">),</span> <span class="n">p</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  softmax([0, 2d]) 与 predict_proba 一致:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">softmax</span><span class="p">(</span><span class="n">scores_shift</span><span class="p">),</span> <span class="n">p</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  ||w_multinomial|| / ||w_ovr|| = </span><span class="si">%.3f</span><span class="s2">"</span>
+      <span class="o">%</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">mul</span><span class="o">.</span><span class="n">coef_</span><span class="p">)</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">ovr</span><span class="o">.</span><span class="n">coef_</span><span class="p">)))</span>
 </pre></div>
 </div>
 </div>
@@ -8534,8 +8680,9 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
   两种模型的 coef_ 最大差: 0.646
 
   expit(2d) == predict_proba[:, 1]: True
-  手工两行系数 + softmax 与 predict_proba 一致: True
-  第一行系数全为 0: True
+  softmax([-d, d]) 与 predict_proba 一致: True
+  softmax([0, 2d]) 与 predict_proba 一致: True
+  ||w_multinomial|| / ||w_ovr|| = 0.515
 </pre>
 </div>
 </div>
@@ -8573,14 +8720,9 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <td><code>O(d)</code></td>
 <td><code>O(d^2)</code></td>
 </tr>
-<tr>
-<td><code>n_iter_</code></td>
-<td>CG 步数</td>
-<td>牛顿迭代数</td>
-</tr>
 </tbody>
 </table>
-<p><code>NewtonSolver.solve</code> 的四步循环对所有牛顿法都一样：<code>update_gradient_hessian → inner_solve → line_search → check_convergence</code>。差别只在 <code>inner_solve</code>。<code>newton-cholesky</code> 在 Hessian 出现大量负值时还会退化成 L-BFGS。</p>
+<p>两套实现并不共享外层循环：<code>newton-cg</code> 走 <code>sklearn/utils/optimize.py::_newton_cg</code>，自己写外层牛顿迭代、内层用 <code>_cg</code> 解 <code>H p = -g</code>；<code>newton-cholesky</code> 才走 <code>NewtonSolver.solve</code> 的模板 <code>update_gradient_hessian → inner_solve → line_search → check_convergence</code>，<code>inner_solve</code> 用 Cholesky。<code>newton-cholesky</code> 在 Hessian 出现大量负值时还会退化成 L-BFGS。两者的 <code>n_iter_</code> 都只记外层牛顿迭代数，内层 CG 步数不计入。</p>
 <p><code>hessp</code> 并不是近似：实测 <code>hessp(v)</code> 与显式 <code>H @ v</code> 的差在 <code>1e-14</code> 量级。换句话说，两种求解器的<strong>目标完全相同</strong>，只是内存换时间。</p>
 </div>
 </div>
@@ -8590,7 +8732,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [14]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [15]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn._loss.loss</span><span class="w"> </span><span class="kn">import</span> <span class="n">HalfBinomialLoss</span>
@@ -8638,7 +8780,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [15]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [16]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
@@ -8649,11 +8791,11 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
     <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
     <span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">(</span><span class="n">record</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">caught</span><span class="p">:</span>
         <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"always"</span><span class="p">)</span>
-        <span class="n">m</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="n">s</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xsub</span><span class="p">,</span> <span class="n">ysub</span><span class="p">)</span>
-    <span class="n">mc</span> <span class="o">=</span> <span class="n">_check_multi_class</span><span class="p">(</span><span class="s2">"auto"</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">ysub</span><span class="p">)))</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%-16s</span><span class="s2"> multi_class=</span><span class="si">%-11s</span><span class="s2"> n_iter_=</span><span class="si">%-18s</span><span class="s2"> 形状=</span><span class="si">%-6s</span><span class="s2"> 用时=</span><span class="si">%.2f</span><span class="s2">s"</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="n">s</span><span class="p">,</span> <span class="n">multi_class</span><span class="o">=</span><span class="s2">"ovr"</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xsub</span><span class="p">,</span> <span class="n">ysub</span><span class="p">)</span>
+    <span class="n">mc</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">multi_class</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%-16s</span><span class="s2"> multi_class=</span><span class="si">%-11s</span><span class="s2"> n_iter_=</span><span class="si">%-18s</span><span class="s2"> 形状=</span><span class="si">%-6s</span><span class="s2"> 用时=</span><span class="si">%.2f</span><span class="s2">s  warn=</span><span class="si">%d</span><span class="s2">"</span>
           <span class="o">%</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">mc</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">tolist</span><span class="p">()),</span> <span class="nb">str</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">shape</span><span class="p">),</span>
-             <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">t0</span><span class="p">))</span>
+             <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">t0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">caught</span><span class="p">)))</span>
 </pre></div>
 </div>
 </div>
@@ -8667,14 +8809,20 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>== digits 前 300 个样本：两种牛顿法 ==
-  newton-cg        multi_class=multinomial n_iter_=[23]               形状=(1,)   用时=0.06s
 </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>  newton-cholesky  multi_class=ovr         n_iter_=[11, 11, 10, 11, 11, 10, 11, 11, 10, 10] 形状=(10,)  用时=5.89s
+<pre>  newton-cg        multi_class=ovr         n_iter_=[25, 35, 21, 21, 21, 32, 25, 26, 35, 24] 形状=(10,)  用时=16.87s  warn=0
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>  newton-cholesky  multi_class=ovr         n_iter_=[11, 11, 10, 11, 11, 10, 11, 11, 10, 10] 形状=(10,)  用时=2.66s  warn=0
 </pre>
 </div>
 </div>
@@ -8691,8 +8839,10 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="highlight"><pre><span></span><span class="n">Cs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logspace</span><span class="p">(</span><span class="o">-</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="n">Cs</span><span class="p">)</span>
 </pre></div>
 <p>与数据、与 <code>n_samples</code> 都无关；默认 10 个点，跨度 8 个数量级。</p>
-<p>工作方式是三层循环：<code>n_classes × n_folds × n_cs</code>。每个 fold 调一次 <code>_log_reg_scoring_path</code>，后者一次算完整个 C 网格；它内部再调 <code>_logistic_regression_path</code>，后者在 <code>for C in Cs</code> 循环里把上一个 C 的解 <code>w0</code> 直接当下一个 C 的初值，所以这条路径天然是 warm start。</p>
+<p>工作方式是三层循环：<code>n_classes × n_folds × n_cs</code>。每个 fold 调一次 <code>_log_reg_scoring_path</code>，后者一次算完整个 C 网格；它内部再调 <code>_logistic_regression_path</code>，后者在 <code>for C in Cs</code> 循环里把上一个 C 的解 <code>w0</code> 直接当下一个 C 的初值 —— 对 <code>lbfgs</code> / <code>newton-cg</code> / <code>newton-cholesky</code> / <code>sag+saga</code> 来说，这条路径天然是 warm start。</p>
+<p><code>liblinear</code> 是例外：它在循环里调用 <code>_fit_liblinear</code>，但<strong>不把结果写回 <code>w0</code></strong>，所以每个 C 都从头算；调用方传进来的 <code>coef</code> 也只写进 <code>w0</code>，随后同样被无视。<code>LogisticRegressionCV</code> 本身更没有 <code>warm_start</code> 参数（<code>_parameter_constraints</code> 里被 <code>pop</code> 掉了）。</p>
 <p>这也解释了 <code>n_iter_</code> 的三维形状：multinomial 是 <code>(1, n_folds, n_cs)</code>；OvR 是 <code>(n_classes, n_folds, n_cs)</code>。二分类的 <code>C_</code> 仍然是长度为 1 的数组，不是标量。</p>
+<p>本节代码为了只演示属性形状，先在全量数据上标准化、再交给 CV；这会让每一折的验证信息进入训练折。若要看选参效果，应把 <code>StandardScaler</code> 放进 <code>Pipeline</code>，让标准化在每个训练折内单独拟合。</p>
 </div>
 </div>
 </div>
@@ -8701,7 +8851,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [16]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [17]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== LogisticRegressionCV：默认 C 网格 =="</span><span class="p">)</span>
@@ -8715,6 +8865,27 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
       <span class="s2">" coefs_paths_[1] ="</span><span class="p">,</span> <span class="n">cv</span><span class="o">.</span><span class="n">coefs_paths_</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  n_iter_ ="</span><span class="p">,</span> <span class="n">cv</span><span class="o">.</span><span class="n">n_iter_</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">cv</span><span class="o">.</span><span class="n">n_iter_</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== 跨 C 的初值复用：liblinear 不参与 =="</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">path_coefs</span><span class="p">(</span><span class="n">solver</span><span class="p">,</span> <span class="n">Cs</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">3</span><span class="p">):</span>
+    <span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">():</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"ignore"</span><span class="p">)</span>
+        <span class="n">coefs</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">_logistic_regression_path</span><span class="p">(</span>
+            <span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">Cs</span><span class="o">=</span><span class="n">Cs</span><span class="p">,</span> <span class="n">solver</span><span class="o">=</span><span class="n">solver</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="n">max_iter</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span>
+            <span class="n">fit_intercept</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">multi_class</span><span class="o">=</span><span class="s2">"ovr"</span><span class="p">,</span> <span class="n">penalty</span><span class="o">=</span><span class="s2">"l2"</span><span class="p">,</span>
+            <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">check_input</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">coefs</span><span class="p">)</span>
+
+
+<span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="s2">"liblinear"</span><span class="p">]:</span>
+    <span class="n">single</span> <span class="o">=</span> <span class="n">path_coefs</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="p">[</span><span class="mf">1.0</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">grid</span> <span class="o">=</span> <span class="n">path_coefs</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="p">[</span><span class="mf">60.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">])[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%-10s</span><span class="s2"> path([1.0]) vs path([60,1])[-1]  |dcoef|=</span><span class="si">%.3e</span><span class="s2">"</span>
+          <span class="o">%</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">single</span> <span class="o">-</span> <span class="n">grid</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  lbfgs 拿 C=60 的解当 C=1 的初值，两次结果不同；liblinear 每轮从头算，逐位相同"</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -8737,6 +8908,126 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 [[[ 3  9  9  8  8  8  8  6  2  1]
   [ 3  7  8  9  8  8  6  6  3  1]
   [ 3  8  9 10  9  7  6  6  3  1]]]
+
+== 跨 C 的初值复用：liblinear 不参与 ==
+  lbfgs      path([1.0]) vs path([60,1])[-1]  |dcoef|=3.167e-01
+  liblinear  path([1.0]) vs path([60,1])[-1]  |dcoef|=0.000e+00
+  lbfgs 拿 C=60 的解当 C=1 的初值，两次结果不同；liblinear 每轮从头算，逐位相同
+</pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=31b71cb9">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<h2 id="8.-%E6%A6%82%E7%8E%87%E8%BE%93%E5%87%BA%E4%B8%8E-%3E-0-%E9%98%88%E5%80%BC">8. 概率输出与 <code>&gt; 0</code> 阈值<a class="anchor-link" href="#8.-%E6%A6%82%E7%8E%87%E8%BE%93%E5%87%BA%E4%B8%8E-%3E-0-%E9%98%88%E5%80%BC">¶</a></h2><p><code>predict</code> 的判据是严格 <code>scores &gt; 0</code>（<code>_base.py</code>），不是 <code>&gt;=</code>：决策值<strong>恰为 0</strong> 时判为 <code>classes_[0]</code>；多分类 OvR 走 <code>argmax</code>，平局时取第一个达到最大值的类。</p>
+<p><code>predict_proba</code> 有两条不同的实现：</p>
+<ul>
+<li><strong>OvR</strong>：对每个类做 <code>expit</code>，再按行归一化。没有零和防护 —— 如果所有决策值都极负，<code>expit</code> 全部下溢到 0，归一化得到 <code>0/0</code>，产生 <code>NaN</code> 和 <code>RuntimeWarning</code>。下面的实验用一个真实的多分类 OvR 模型，但把系数与截距人为设成极端值来触发这个边界；正常拟合的数据不会出现。</li>
+<li><strong>multinomial</strong>：<code>np.c_[-decision, decision]</code> 后做 softmax；二分类只有 1D 决策值，靠这一步补成两类。</li>
+</ul>
+<p>所以 OvR 概率不是「各自独立的概率」，而是按行归一化后的相对分数。</p>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=afdb294d">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [18]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="cm-editor cm-s-jupyter">
+<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== 决策值恰为 0：predict 的严格 &gt; 0 =="</span><span class="p">)</span>
+<span class="n">m0</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="s2">"lbfgs"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<span class="n">m0</span><span class="o">.</span><span class="n">coef_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">1</span><span class="p">,</span> <span class="n">Xs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span>   <span class="c1"># 人为把参数置零，让决策值精确等于 0</span>
+<span class="n">m0</span><span class="o">.</span><span class="n">intercept_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">d</span> <span class="o">=</span> <span class="n">m0</span><span class="o">.</span><span class="n">decision_function</span><span class="p">(</span><span class="n">Xs</span><span class="p">[:</span><span class="mi">4</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  decision_function ="</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="s2">" 全部恰为 0:"</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">d</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  predict ="</span><span class="p">,</span> <span class="n">m0</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">Xs</span><span class="p">[:</span><span class="mi">4</span><span class="p">]),</span> <span class="s2">" classes_ ="</span><span class="p">,</span> <span class="n">m0</span><span class="o">.</span><span class="n">classes_</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  predict_proba ="</span><span class="p">,</span> <span class="n">m0</span><span class="o">.</span><span class="n">predict_proba</span><span class="p">(</span><span class="n">Xs</span><span class="p">[:</span><span class="mi">4</span><span class="p">])</span><span class="o">.</span><span class="n">tolist</span><span class="p">())</span>
+
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== 多分类 OvR 的平局：argmax 取第一个 =="</span><span class="p">)</span>
+<span class="n">X3</span><span class="p">,</span> <span class="n">y3</span> <span class="o">=</span> <span class="n">make_classification</span><span class="p">(</span><span class="n">n_samples</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span> <span class="n">n_features</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">n_informative</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+                             <span class="n">n_classes</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">n_clusters_per_class</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">m3</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="n">multi_class</span><span class="o">=</span><span class="s2">"ovr"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X3</span><span class="p">,</span> <span class="n">y3</span><span class="p">)</span>
+<span class="n">m3</span><span class="o">.</span><span class="n">coef_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">3</span><span class="p">,</span> <span class="n">X3</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span>
+<span class="n">m3</span><span class="o">.</span><span class="n">intercept_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  decision =</span><span class="se">\n</span><span class="s2">"</span><span class="p">,</span> <span class="n">m3</span><span class="o">.</span><span class="n">decision_function</span><span class="p">(</span><span class="n">X3</span><span class="p">[:</span><span class="mi">4</span><span class="p">]))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  predict ="</span><span class="p">,</span> <span class="n">m3</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">X3</span><span class="p">[:</span><span class="mi">4</span><span class="p">]))</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell-outputWrapper">
+<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
+</div>
+<div class="jp-OutputArea jp-Cell-outputArea">
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>== 决策值恰为 0：predict 的严格 &gt; 0 ==
+  decision_function = [0. 0. 0. 0.]  全部恰为 0: True
+  predict = [0 0 0 0]  classes_ = [0 1]
+  predict_proba = [[0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5]]
+
+== 多分类 OvR 的平局：argmax 取第一个 ==
+  decision =
+ [[0. 0. 0.]
+ [0. 0. 0.]
+ [0. 0. 0.]
+ [0. 0. 0.]]
+  predict = [0 0 0 0]
+</pre>
+</div>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=1dcca6c2">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [19]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="cm-editor cm-s-jupyter">
+<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== OvR 概率的边界：0/0 =="</span><span class="p">)</span>
+<span class="n">m4</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="n">multi_class</span><span class="o">=</span><span class="s2">"ovr"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X3</span><span class="p">,</span> <span class="n">y3</span><span class="p">)</span>
+<span class="n">m4</span><span class="o">.</span><span class="n">coef_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">3</span><span class="p">,</span> <span class="n">X3</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span>    <span class="c1"># 人为构造：所有类的分数都极负</span>
+<span class="n">m4</span><span class="o">.</span><span class="n">intercept_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="o">-</span><span class="mf">800.0</span><span class="p">)</span>
+<span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">(</span><span class="n">record</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">caught</span><span class="p">:</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"always"</span><span class="p">)</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">m4</span><span class="o">.</span><span class="n">predict_proba</span><span class="p">(</span><span class="n">X3</span><span class="p">[:</span><span class="mi">3</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  predict_proba 形状 ="</span><span class="p">,</span> <span class="n">p</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  出现 NaN:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">p</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  警告:"</span><span class="p">,</span> <span class="p">[</span><span class="s2">"</span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">category</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span> <span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">caught</span><span class="p">])</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell-outputWrapper">
+<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
+</div>
+<div class="jp-OutputArea jp-Cell-outputArea">
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>== OvR 概率的边界：0/0 ==
+  predict_proba 形状 = (3, 3)
+[[nan nan nan]
+ [nan nan nan]
+ [nan nan nan]]
+  出现 NaN: True
+  警告: ['RuntimeWarning: invalid value encountered in divide']
 </pre>
 </div>
 </div>
@@ -8749,7 +9040,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="8.-%E9%9D%99%E9%BB%98%E5%BF%BD%E7%95%A5-/-%E8%AD%A6%E5%91%8A-/-%E6%8A%A5%E9%94%99%EF%BC%9A%E5%8F%82%E6%95%B0%E7%9A%84%E5%AE%9E%E9%99%85%E8%90%BD%E7%82%B9">8. 静默忽略 / 警告 / 报错：参数的实际落点<a class="anchor-link" href="#8.-%E9%9D%99%E9%BB%98%E5%BF%BD%E7%95%A5-/-%E8%AD%A6%E5%91%8A-/-%E6%8A%A5%E9%94%99%EF%BC%9A%E5%8F%82%E6%95%B0%E7%9A%84%E5%AE%9E%E9%99%85%E8%90%BD%E7%82%B9">¶</a></h2><p>同一个参数名，在不同 solver 下的命运可能完全不同：</p>
+<h2 id="9.-%E9%9D%99%E9%BB%98%E5%BF%BD%E7%95%A5-/-%E8%AD%A6%E5%91%8A-/-%E6%8A%A5%E9%94%99%EF%BC%9A%E5%8F%82%E6%95%B0%E7%9A%84%E5%AE%9E%E9%99%85%E8%90%BD%E7%82%B9">9. 静默忽略 / 警告 / 报错：参数的实际落点<a class="anchor-link" href="#9.-%E9%9D%99%E9%BB%98%E5%BF%BD%E7%95%A5-/-%E8%AD%A6%E5%91%8A-/-%E6%8A%A5%E9%94%99%EF%BC%9A%E5%8F%82%E6%95%B0%E7%9A%84%E5%AE%9E%E9%99%85%E8%90%BD%E7%82%B9">¶</a></h2><p>同一个参数名，在不同 solver 下的命运可能完全不同：</p>
 <table>
 <thead>
 <tr>
@@ -8777,7 +9068,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <tr>
 <td><code>warm_start</code></td>
 <td><code>liblinear</code></td>
-<td><code>fit</code> 早退，<strong>静默忽略</strong></td>
+<td><code>fit</code> 早退，<strong>静默忽略</strong>；path 的 liblinear 分支也不写回 <code>w0</code></td>
 </tr>
 <tr>
 <td><code>n_jobs</code></td>
@@ -8797,11 +9088,11 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <tr>
 <td><code>tol</code></td>
 <td>各实现</td>
-<td>量纲不同：<code>gtol</code> / CG 相对残差 / liblinear 的 <code>eps</code></td>
+<td>量纲不同：lbfgs 的 <code>gtol</code>（投影梯度 ∞-范数）、两种牛顿法的梯度 ∞-范数、<code>sag</code>/<code>saga</code> 的内核判据、liblinear 传给 C++ 的 <code>eps</code></td>
 </tr>
 </tbody>
 </table>
-<p>liblinear 还有一张<strong>魔数表</strong>：<code>(multi_class, penalty, loss, dual)</code> 四元组映射到一个整数，C++ 内核按这个整数选算法。逻辑回归只用到 3 个值：<code>l2</code> 原生 <code>0</code>、<code>l2</code> 对偶 <code>7</code>、<code>l1</code> 原生 <code>6</code>。<code>penalty=None</code> 之所以报「Unsupported set of arguments」，就是因为它在这张表里查不到。</p>
+<p>liblinear 还有一张 <code>_solver_type_dict</code> 查表：<code>(multi_class, penalty, loss, dual)</code> 四元组映射到一个整数，C++ 内核按这个整数选算法。逻辑回归只用到 3 个值：<code>l2</code> 原生 <code>0</code>、<code>l2</code> 对偶 <code>7</code>、<code>l1</code> 原生 <code>6</code>。<code>penalty=None</code> 之所以报「Unsupported set of arguments」，就是因为它在这张表里查不到。</p>
 </div>
 </div>
 </div>
@@ -8810,7 +9101,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [17]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [20]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.svm._base</span><span class="w"> </span><span class="kn">import</span> <span class="n">_get_liblinear_solver_type</span>
@@ -8819,7 +9110,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <span class="n">i0</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">src</span><span class="p">)</span> <span class="k">if</span> <span class="s2">"_solver_type_dict = {"</span> <span class="ow">in</span> <span class="n">l</span><span class="p">)</span>
 <span class="n">i1</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">src</span><span class="p">)</span> <span class="k">if</span> <span class="s2">"Unsupported set of arguments"</span> <span class="ow">in</span> <span class="n">l</span><span class="p">)</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="s2">"== liblinear 魔数表（从函数首行 L</span><span class="si">%d</span><span class="s2"> 起算）=="</span> <span class="o">%</span> <span class="n">start</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== liblinear 的 solver_type 查表（从函数首行 L</span><span class="si">%d</span><span class="s2"> 起算）=="</span> <span class="o">%</span> <span class="n">start</span><span class="p">)</span>
 <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i0</span><span class="p">,</span> <span class="n">i0</span> <span class="o">+</span> <span class="mi">8</span><span class="p">):</span>
     <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="si">%4d</span><span class="s2">| </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">start</span> <span class="o">+</span> <span class="n">i</span><span class="p">,</span> <span class="n">src</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">rstrip</span><span class="p">()))</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"   ..."</span><span class="p">)</span>
@@ -8827,7 +9118,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
     <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="si">%4d</span><span class="s2">| </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">start</span> <span class="o">+</span> <span class="n">i</span><span class="p">,</span> <span class="n">src</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">rstrip</span><span class="p">()))</span>
 <span class="nb">print</span><span class="p">()</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="s2">"== 逻辑回归用到的三个魔数 =="</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"== 逻辑回归用到的三个取值 =="</span><span class="p">)</span>
 <span class="k">for</span> <span class="n">penalty</span><span class="p">,</span> <span class="n">dual</span> <span class="ow">in</span> <span class="p">[(</span><span class="s2">"l2"</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span> <span class="p">(</span><span class="s2">"l2"</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span> <span class="p">(</span><span class="s2">"l1"</span><span class="p">,</span> <span class="kc">False</span><span class="p">)]:</span>
     <span class="nb">print</span><span class="p">(</span><span class="s2">"  penalty=</span><span class="si">%-2s</span><span class="s2"> dual=</span><span class="si">%-5s</span><span class="s2"> -&gt; solver_type=</span><span class="si">%d</span><span class="s2">"</span>
           <span class="o">%</span> <span class="p">(</span><span class="n">penalty</span><span class="p">,</span> <span class="n">dual</span><span class="p">,</span>
@@ -8844,7 +9135,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>== liblinear 魔数表（从函数首行 L1009 起算）==
+<pre>== liblinear 的 solver_type 查表（从函数首行 L1009 起算）==
 1025|     _solver_type_dict = {
 1026|         "logistic_regression": {"l1": {False: 6}, "l2": {False: 0, True: 7}},
 1027|         "hinge": {"l2": {True: 3}},
@@ -8860,7 +9151,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 1062|         % (error_string, penalty, loss, dual)
 1063|     )
 
-== 逻辑回归用到的三个魔数 ==
+== 逻辑回归用到的三个取值 ==
   penalty=l2 dual=False -&gt; solver_type=0
   penalty=l2 dual=True  -&gt; solver_type=7
   penalty=l1 dual=False -&gt; solver_type=6
@@ -8874,7 +9165,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [18]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [21]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== 被忽略 / 被警告 / 被报错的参数 =="</span><span class="p">)</span>
@@ -8895,10 +9186,25 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  l1_ratio + l2                 -&gt;"</span><span class="p">,</span>
       <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">caught</span> <span class="k">if</span> <span class="s2">"l1_ratio"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)])</span>
 
-<span class="n">a</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="s2">"liblinear"</span><span class="p">,</span> <span class="n">warm_start</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="n">b</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="s2">"liblinear"</span><span class="p">,</span> <span class="n">warm_start</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  warm_start(liblinear) 二次拟合 |dcoef|=</span><span class="si">%.2e</span><span class="s2">  （静默忽略）"</span>
-      <span class="o">%</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">coef_</span> <span class="o">-</span> <span class="n">b</span><span class="o">.</span><span class="n">coef_</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">one_coef</span><span class="p">(</span><span class="n">solver</span><span class="p">,</span> <span class="n">coef</span><span class="p">):</span>
+    <span class="c1"># 直接调 path，观察传入的初值 coef 是否被使用（max_iter 故意设小）</span>
+    <span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">():</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"ignore"</span><span class="p">)</span>
+        <span class="n">coefs</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">_logistic_regression_path</span><span class="p">(</span>
+            <span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">Cs</span><span class="o">=</span><span class="p">[</span><span class="mf">1.0</span><span class="p">],</span> <span class="n">solver</span><span class="o">=</span><span class="n">solver</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span>
+            <span class="n">fit_intercept</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">multi_class</span><span class="o">=</span><span class="s2">"ovr"</span><span class="p">,</span> <span class="n">penalty</span><span class="o">=</span><span class="s2">"l2"</span><span class="p">,</span>
+            <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">check_input</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">coef</span><span class="o">=</span><span class="n">coef</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">coefs</span><span class="p">)</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span>
+
+
+<span class="n">w_start</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">Xs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+<span class="n">w_start</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mf">40.0</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  传入初值 vs 不传（max_iter=3）："</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="s2">"liblinear"</span><span class="p">]:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"    </span><span class="si">%-10s</span><span class="s2"> |dcoef|=</span><span class="si">%.2e</span><span class="s2">"</span>
+          <span class="o">%</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">one_coef</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">w_start</span><span class="p">)</span> <span class="o">-</span> <span class="n">one_coef</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"    说明：lbfgs 用上了初值；liblinear 的 path 分支不读也不写 w0"</span><span class="p">)</span>
 
 <span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">(</span><span class="n">record</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">caught</span><span class="p">:</span>
     <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"always"</span><span class="p">)</span>
@@ -8917,7 +9223,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
         <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
             <span class="k">pass</span>
     <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%-15s</span><span class="s2"> 接受: </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">accepted</span><span class="p">))</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  注意：liblinear + penalty=None 能过 _check_solver，但会在魔数表报错"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"  注意：liblinear + penalty=None 能过 _check_solver，但会在 _solver_type_dict 查表时报错"</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -8934,7 +9240,10 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
   intercept_scaling(liblinear)  |dcoef|=6.38e-04
   intercept_scaling(lbfgs)      |dcoef|=0.00e+00  （静默忽略）
   l1_ratio + l2                 -&gt; ["l1_ratio parameter is only used when penalty is 'elasticnet'. Got (penalty=l2)"]
-  warm_start(liblinear) 二次拟合 |dcoef|=0.00e+00  （静默忽略）
+  传入初值 vs 不传（max_iter=3）：
+    lbfgs      |dcoef|=1.04e+01
+    liblinear  |dcoef|=0.00e+00
+    说明：lbfgs 用上了初值；liblinear 的 path 分支不读也不写 w0
   n_jobs=2 + liblinear          -&gt; ["'n_jobs' &gt; 1 does not have any effect when 'solver' is set to 'libline"]
 
 == _check_solver 能提前拦下的 penalty ==
@@ -8944,106 +9253,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
   newton-cholesky 接受: ['l2', None]
   sag             接受: ['l2', None]
   saga            接受: ['l2', 'l1', 'elasticnet', None]
-  注意：liblinear + penalty=None 能过 _check_solver，但会在魔数表报错
-</pre>
-</div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=31b71cb9">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="9.-%E6%A6%82%E7%8E%87%E8%BE%93%E5%87%BA%E4%B8%8E-%3E-0-%E9%98%88%E5%80%BC">9. 概率输出与 <code>&gt; 0</code> 阈值<a class="anchor-link" href="#9.-%E6%A6%82%E7%8E%87%E8%BE%93%E5%87%BA%E4%B8%8E-%3E-0-%E9%98%88%E5%80%BC">¶</a></h2><p><code>predict</code> 的判据是严格 <code>scores &gt; 0</code>（<code>_base.py</code>），不是 <code>&gt;=</code>。决策值恰为 0 时判为 <code>classes_[0]</code>。</p>
-<p><code>predict_proba</code> 有两条完全不同的实现：</p>
-<ul>
-<li><strong>OvR</strong>：对每个类做 <code>expit</code>，再按行归一化。没有零和防护 —— 如果所有决策值都极负，<code>expit</code> 全部下溢到 0，归一化会得到 <code>0/0</code>，产生 <code>NaN</code> 和 <code>RuntimeWarning</code>。</li>
-<li><strong>multinomial</strong>：<code>np.c_[-decision, decision]</code> 后做 softmax；二分类只有 1D 决策值，靠这一步补成两类。</li>
-</ul>
-<p>正常数据不会触发 <code>NaN</code>，但它是实现里真实存在的边界：OvR 概率不是「各自独立的概率」，而是「强行归一化后的相对分数」。</p>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=afdb294d">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [19]:</div>
-<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== 决策值恰好为 0 / 极小正负 =="</span><span class="p">)</span>
-<span class="n">m</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="s2">"lbfgs"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="n">d0</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">decision_function</span><span class="p">(</span><span class="n">Xs</span><span class="p">[:</span><span class="mi">1</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
-<span class="n">w</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">m</span><span class="o">.</span><span class="n">intercept_</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-<span class="k">for</span> <span class="n">target</span> <span class="ow">in</span> <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1e-12</span><span class="p">,</span> <span class="o">-</span><span class="mf">1e-12</span><span class="p">]:</span>
-    <span class="n">x</span> <span class="o">=</span> <span class="n">Xs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="p">(</span><span class="n">target</span> <span class="o">-</span> <span class="n">d0</span><span class="p">)</span> <span class="o">*</span> <span class="n">w</span> <span class="o">/</span> <span class="p">(</span><span class="n">w</span> <span class="o">@</span> <span class="n">w</span><span class="p">)</span>
-    <span class="n">d</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">decision_function</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:])[</span><span class="mi">0</span><span class="p">]</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">"  目标 </span><span class="si">%.0e</span><span class="s2"> -&gt; 决策 </span><span class="si">%+.3e</span><span class="s2"> -&gt; predict </span><span class="si">%d</span><span class="s2">"</span>
-          <span class="o">%</span> <span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:])[</span><span class="mi">0</span><span class="p">]))</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  classes_ ="</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">classes_</span><span class="p">)</span>
-</pre></div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell-outputWrapper">
-<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
-</div>
-<div class="jp-OutputArea jp-Cell-outputArea">
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>== 决策值恰好为 0 / 极小正负 ==
-  目标 0e+00 -&gt; 决策 -1.249e-16 -&gt; predict 0
-  目标 1e-12 -&gt; 决策 +9.999e-13 -&gt; predict 1
-  目标 -1e-12 -&gt; 决策 -9.999e-13 -&gt; predict 0
-  classes_ = [0 1]
-</pre>
-</div>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=1dcca6c2">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [20]:</div>
-<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== OvR 概率的边界：0/0 =="</span><span class="p">)</span>
-<span class="n">m2</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="s2">"lbfgs"</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">Xs</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="n">m2</span><span class="o">.</span><span class="n">decision_function</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">Z</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">Z</span><span class="p">),</span> <span class="mi">2</span><span class="p">),</span> <span class="o">-</span><span class="mf">800.0</span><span class="p">)</span>
-<span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">(</span><span class="n">record</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">caught</span><span class="p">:</span>
-    <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">"always"</span><span class="p">)</span>
-    <span class="n">p</span> <span class="o">=</span> <span class="n">m2</span><span class="o">.</span><span class="n">predict_proba</span><span class="p">(</span><span class="n">Xs</span><span class="p">[:</span><span class="mi">3</span><span class="p">])</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  predict_proba ="</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  出现 NaN:"</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">p</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">())</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"  警告:"</span><span class="p">,</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">message</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">caught</span><span class="p">])</span>
-</pre></div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell-outputWrapper">
-<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
-</div>
-<div class="jp-OutputArea jp-Cell-outputArea">
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>== OvR 概率的边界：0/0 ==
-  predict_proba =
-[[nan nan]
- [nan nan]
- [nan nan]]
-  出现 NaN: True
-  警告: ['invalid value encountered in divide']
+  注意：liblinear + penalty=None 能过 _check_solver，但会在 _solver_type_dict 查表时报错
 </pre>
 </div>
 </div>
@@ -9062,27 +9272,33 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <tr>
 <th>使用它的 solver</th>
 <th>实现</th>
-<th>能否读源码</th>
+<th>源码位置（1.3.2）</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>lbfgs</code> / <code>newton-cg</code> / <code>newton-cholesky</code></td>
-<td><code>_loss/_loss*.so</code>（<code>HalfBinomialLoss</code> / <code>HalfMultinomialLoss</code>）</td>
-<td>否</td>
+<td><code>_loss/_loss*.so</code> 里的 <code>HalfBinomialLoss</code> / <code>HalfMultinomialLoss</code></td>
+<td><code>sklearn/_loss/loss.pyx</code>、<code>_loss.pyx.tp</code></td>
 </tr>
 <tr>
 <td><code>sag</code> / <code>saga</code></td>
 <td><code>_sag_fast*.so</code> 内部的 log / multinomial loss</td>
-<td>否</td>
+<td><code>sklearn/linear_model/_sag_fast.pyx</code></td>
 </tr>
 <tr>
 <td><code>liblinear</code></td>
 <td>C++ 内部的 logistic 损失</td>
-<td>否</td>
+<td><code>sklearn/svm/src/liblinear/linear.cpp</code></td>
 </tr>
 </tbody>
 </table>
+<p>wheel 里只装了编译后的 <code>.so</code>，<code>inspect.getsource</code> 读不到；但源码本身在仓库里，对应的 <code>.pyx</code> / <code>.tp</code> / <code>.cpp</code> 都能直接打开：</p>
+<ul>
+<li><a href="https://github.com/scikit-learn/scikit-learn/blob/1.3.2/sklearn/linear_model/_sag_fast.pyx">https://github.com/scikit-learn/scikit-learn/blob/1.3.2/sklearn/linear_model/_sag_fast.pyx</a></li>
+<li><a href="https://github.com/scikit-learn/scikit-learn/blob/1.3.2/sklearn/_loss/_loss.pyx.tp">https://github.com/scikit-learn/scikit-learn/blob/1.3.2/sklearn/_loss/_loss.pyx.tp</a></li>
+<li><a href="https://github.com/scikit-learn/scikit-learn/blob/1.3.2/sklearn/svm/src/liblinear/linear.cpp">https://github.com/scikit-learn/scikit-learn/blob/1.3.2/sklearn/svm/src/liblinear/linear.cpp</a></li>
+</ul>
 <p>三者的数学形式相同，但<strong>归一化方式不同</strong>：<code>LinearModelLoss</code> 返回 <code>sum_i sw_i * loss_i</code>，SAG 的目标是 <code>(1/n) sum_i loss_i</code>，liblinear 是 <code>C * sum_i loss_i + 0.5‖w‖²</code>。这也是同一个 <code>C</code> 需要三种缩放的原因。</p>
 <p><strong>dtype 能力矩阵</strong>：<code>lbfgs</code> 强制 <code>float64</code>；其余 solver 接受 <code>[float64, float32]</code>，但 <code>liblinear</code> 内部再转回 <code>float64</code>。所以 <code>float32</code> 输入下，只有 <code>newton-cg</code> / <code>newton-cholesky</code> / <code>sag</code> / <code>saga</code> 的 <code>coef_</code> 保持 <code>float32</code>。</p>
 <p><strong><code>n_threads</code></strong>：<code>_logistic_regression_path</code> 里有一段看起来很讲究的分支，注释说「未来希望用 OpenMP 线程」，但 1.3.2 的两个分支都赋值 <code>1</code> —— 实际并行仍然靠 joblib 按类分发，损失内核是单线程。</p>
@@ -9094,7 +9310,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [21]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [22]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">"== 三份实现的位置 =="</span><span class="p">)</span>
@@ -9153,13 +9369,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
   lbfgs           coef_.dtype=float64  n_iter_=[10]
   liblinear       coef_.dtype=float64  n_iter_=[5]
   newton-cg       coef_.dtype=float32  n_iter_=[9]
-</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>  newton-cholesky coef_.dtype=float32  n_iter_=[5]
+  newton-cholesky coef_.dtype=float32  n_iter_=[5]
   sag             coef_.dtype=float32  n_iter_=[26]
   saga            coef_.dtype=float32  n_iter_=[16]
 </pre>
@@ -9172,10 +9382,12 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [22]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [23]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="n">show_lines</span><span class="p">([(</span><span class="mi">1292</span><span class="p">,</span> <span class="mi">1302</span><span class="p">)],</span> <span class="n">title</span><span class="o">=</span><span class="s2">"== n_threads 的赋值：两个分支都等于 1 =="</span><span class="p">)</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="n">show_lines</span><span class="p">([</span><span class="n">find_span</span><span class="p">(</span><span class="s2">"# TODO: Refactor this to avoid joblib parallelism entirely when doing binary"</span><span class="p">,</span>
+                       <span class="s2">"n_threads = 1"</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="n">LogisticRegression</span><span class="o">.</span><span class="n">fit</span><span class="p">,</span> <span class="n">last</span><span class="o">=</span><span class="kc">True</span><span class="p">)],</span>
+           <span class="n">title</span><span class="o">=</span><span class="s2">"== n_threads 的赋值：两个分支都等于 1（行号现场定位）=="</span><span class="p">)</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.utils._openmp_helpers</span><span class="w"> </span><span class="kn">import</span> <span class="n">_openmp_effective_n_threads</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"  OpenMP 可用线程数:"</span><span class="p">,</span> <span class="n">_openmp_effective_n_threads</span><span class="p">())</span>
@@ -9192,8 +9404,11 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>== n_threads 的赋值：两个分支都等于 1 ==
-  L1292-L1302
+<pre>== n_threads 的赋值：两个分支都等于 1（行号现场定位）==
+  L1289-L1301
+1289|         # TODO: Refactor this to avoid joblib parallelism entirely when doing binary
+1290|         # and multinomial multiclass classification and use joblib only for the
+1291|         # one-vs-rest multiclass case.
 1292|         if (
 1293|             solver in ["lbfgs", "newton-cg", "newton-cholesky"]
 1294|             and len(classes_) == 1
@@ -9204,7 +9419,6 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 1299|             n_threads = 1
 1300|         else:
 1301|             n_threads = 1
-1302| 
 
 </pre>
 </div>
@@ -9247,12 +9461,12 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 </tr>
 <tr>
 <td><code>penalty</code></td>
-<td><code>_check_solver</code> + 魔数表 + SAG 的 <code>alpha/beta</code></td>
+<td><code>_check_solver</code> + <code>_solver_type_dict</code> 查表 + SAG 的 <code>alpha/beta</code></td>
 <td><code>l1</code> 只有 liblinear / saga；<code>elasticnet</code> 只有 saga</td>
 </tr>
 <tr>
 <td><code>dual</code></td>
-<td><code>_check_solver</code> + 魔数表</td>
+<td><code>_check_solver</code> + <code>_solver_type_dict</code> 查表</td>
 <td>只有 liblinear + <code>l2</code> 支持</td>
 </tr>
 <tr>
@@ -9263,7 +9477,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <tr>
 <td><code>class_weight</code></td>
 <td>折叠进 <code>sample_weight</code></td>
-<td><code>balanced</code> 在 OvR 掩码之前按全量标签计算</td>
+<td><code>balanced</code> 在 OvR 里按掩码后的二值标签算；dict 与 multinomial 才用原始标签</td>
 </tr>
 <tr>
 <td><code>sample_weight</code></td>
@@ -9288,7 +9502,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 <tr>
 <td><code>warm_start</code></td>
 <td>传给 path 的 <code>coef</code></td>
-<td>liblinear 早退，静默无效</td>
+<td>liblinear 在 <code>fit</code> 早退，参数没有入口；path 的 liblinear 分支也不写回 <code>w0</code></td>
 </tr>
 <tr>
 <td><code>tol</code></td>
@@ -9312,7 +9526,7 @@ liblinear   auto           (10, 64)   (10,)           0.9933      0
 </tr>
 </tbody>
 </table>
-<p>一句话收尾：<strong>读 <code>LogisticRegression</code> 的源码，90% 的代码在做「把统一的参数翻译成五种实现的方言」；真正的算法在 <code>.so</code> 和 scipy 里。</strong></p>
+<p>一句话收尾：<strong><code>LogisticRegression</code> 的源码里，大量篇幅在做「把统一的参数翻译成五种实现的方言」；核心数值循环在编译扩展（Cython / C++）与 scipy 里，源码仍然可读，只是不在 <code>.so</code> 里。</strong></p>
 </div>
 </div>
 </div>
