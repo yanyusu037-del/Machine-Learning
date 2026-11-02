@@ -7538,7 +7538,6 @@ a.anchor-link {
 <p><strong>主线</strong>：<code>linear_model.LogisticRegression</code> 与 <code>LogisticRegressionCV</code>；<code>SGDClassifier(loss="log_loss")</code> 不在主线（hw5 已讲 SGD 框架）。</p>
 </blockquote>
 <p>环境：<code>scikit-learn 1.3.2</code> / Python 3.8。以下实现细节均限定于 <strong>scikit-learn 1.3.2</strong>；文中行号也以 1.3.2 的库为准；notebook 内的行号一律由 <code>inspect</code> 现场取得，版本不符时第一段代码的断言会直接失败。</p>
-<p><strong>阅读路线</strong>：§1 是数学目标与符号；§2–§4 建立 <code>fit</code> 的骨架（solver 分派 → <code>n_iter_</code> 语义 → 多分类策略）；§5–§6 是二分类参数化与两种牛顿法；§7–§8 讲 CV 与预测；§9–§10 收参数落点与数值边界；§11 是汇总表。每节按「问题 → 关键源码 → 实验 → 结论」展开，也可以按需跳读。</p>
 </div>
 </div>
 </div>
@@ -7768,7 +7767,7 @@ $$</p>
 <p>符号约定：</p>
 <ul>
 <li><code>w</code> 是系数向量，<strong>不含截距</strong>；截距 <code>b</code> 单独列出，默认不进正则。</li>
-<li><code>x_i^\top w + b</code> 就是 <code>decision_function</code> 返回的 <code>z</code>；本节以二分类 OvR 的参数化为例，此时 <code>P(y=1 \mid x) = \sigma(z)</code>。二分类 multinomial 的参数化见第 5 节。</li>
+<li>$x_i^\top w + b$ 就是 <code>decision_function</code> 返回的 <code>z</code>；本节以二分类 OvR 的参数化为例，此时 <code>P(y=1 \mid x) = \sigma(z)</code>。二分类 multinomial 的参数化见第 5 节。</li>
 <li><code>s_i</code> 是 <code>sample_weight_i</code>，<code>\ell</code> 是 log loss，<code>C</code> 是正则强度的倒数（<code>C</code> 越大正则越弱）。</li>
 </ul>
 <p>截距的唯一例外是 liblinear：它把截距做成一个合成特征，与 <code>w</code> 一起被罚（<code>intercept_scaling</code> 只改变这个合成特征的数值）。所以同一份数据、同样的 <code>C</code>，liblinear 优化的目标与其余 solver 并不相同。</p>
@@ -7790,7 +7789,7 @@ $$</p>
 <tr>
 <td><code>newton-cholesky</code></td>
 <td>先把 <code>sample_weight</code> 归一到和为 1，再令 <code>l2_reg_strength = 1/(C * sum(sw))</code></td>
-<td>源码注释 <code>nasty matter</code> 指这一步很棘手</td>
+<td>源码注释 <code>nasty matter</code> （指这一步很棘手）</td>
 </tr>
 <tr>
 <td><code>sag</code> / <code>saga</code></td>
@@ -8026,8 +8025,7 @@ $$</p>
 <p><code>solver</code> 同时决定：<code>penalty</code>、<code>tol</code> 的量纲、<code>n_iter_</code> 的语义、并行方式（进程 / 线程 / 无）。</p>
 <p>path 里其实也有一段 <code>elif solver == "liblinear"</code>，但 <code>LogisticRegression.fit</code> 永远走不到它 —— 它只服务 <code>LogisticRegressionCV</code>（CV 通过 <code>_log_reg_scoring_path</code> 调 path）。</p>
 <p>使用同一份 300×8 二分类数据，设定 <code>tol=1e-6, max_iter=1000</code> 进行测试。默认设置下，liblinear 与其余 solver 优化的<strong>并不是同一个目标</strong>：liblinear 把截距当成一个合成特征，<strong>照样参与正则</strong>（<code>intercept_scaling</code> 的 docstring 原话：the synthetic feature weight is subject to l1/l2 regularization），而其余 solver 的截距不进正则。所以 <code>111.928882</code> 与 <code>111.928737</code> 的差距不能直接归因于优化精度。</p>
-<p>下面打印的 <code>objective</code> 是用同一个 <code>LinearModelLoss</code>（<code>l2_reg_strength=1.0</code>）算出的统一评估值，不是各 solver 自己的训练目标。</p>
-<p>下面用 <code>fit_intercept=False</code> 做对照：目标函数一致之后，剩下的差异才是优化精度。</p>
+<p>下面打印的 <code>objective</code> 是用同一个 <code>LinearModelLoss</code>（<code>l2_reg_strength=1.0</code>）算出的统一评估值，不是各 solver 自己的训练目标。用 <code>fit_intercept=False</code> 做对照：目标函数一致之后，剩下的差异是优化精度。</p>
 </div>
 </div>
 </div>
@@ -8174,7 +8172,7 @@ saga            [22]          4.82e-06  112.111494173      0
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="3.-n_iter_-%E5%9C%A8%E4%B8%8D%E5%90%8C-solver-%E4%B8%8B%E7%9A%84%E8%BF%AD%E4%BB%A3%E8%AF%AD%E4%B9%89%EF%BC%8C%E8%80%8C%E4%B8%94-docstring-%E5%AF%B9-liblinear-%E5%86%99%E9%94%99%E4%BA%86">3. <code>n_iter_</code> 在不同 solver 下的迭代语义，而且 docstring 对 liblinear 写错了<a class="anchor-link" href="#3.-n_iter_-%E5%9C%A8%E4%B8%8D%E5%90%8C-solver-%E4%B8%8B%E7%9A%84%E8%BF%AD%E4%BB%A3%E8%AF%AD%E4%B9%89%EF%BC%8C%E8%80%8C%E4%B8%94-docstring-%E5%AF%B9-liblinear-%E5%86%99%E9%94%99%E4%BA%86">¶</a></h2><p><code>fit</code> 把各路径的计数统一成 <code>np.int32</code> 数组（liblinear 由 C++ 返回，其余由 <code>_logistic_regression_path</code> 汇总），但里面装的是不同量纲的计数：</p>
+<h2 id="3.-n_iter_-%E5%9C%A8%E4%B8%8D%E5%90%8C-solver-%E4%B8%8B%E7%9A%84%E8%BF%AD%E4%BB%A3%E8%AF%AD%E4%B9%89%EF%BC%8Cdocstring-%E5%AF%B9-liblinear-%E6%8F%8F%E8%BF%B0%E4%B8%8D%E7%AC%A6">3. <code>n_iter_</code> 在不同 solver 下的迭代语义，docstring 对 liblinear 描述不符<a class="anchor-link" href="#3.-n_iter_-%E5%9C%A8%E4%B8%8D%E5%90%8C-solver-%E4%B8%8B%E7%9A%84%E8%BF%AD%E4%BB%A3%E8%AF%AD%E4%B9%89%EF%BC%8Cdocstring-%E5%AF%B9-liblinear-%E6%8F%8F%E8%BF%B0%E4%B8%8D%E7%AC%A6">¶</a></h2><p><code>fit</code> 把各路径的计数统一成 <code>np.int32</code> 数组（liblinear 由 C++ 返回，其余由 <code>_logistic_regression_path</code> 汇总），但里面装的是不同量纲的计数：</p>
 <ul>
 <li><code>lbfgs</code>：L-BFGS 迭代数；</li>
 <li><code>newton-cg</code>：外层牛顿迭代数（内层 CG 步不计入）；</li>
@@ -8232,7 +8230,7 @@ saga            [22]          4.82e-06  112.111494173      0
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [9]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.datasets</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_digits</span>
@@ -8247,7 +8245,7 @@ saga            [22]          4.82e-06  112.111494173      0
     <span class="nb">dict</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="s2">"liblinear"</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span>
     <span class="nb">dict</span><span class="p">(</span><span class="n">solver</span><span class="o">=</span><span class="s2">"newton-cholesky"</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">200</span><span class="p">),</span>
 <span class="p">]</span>
-<span class="n">digit_models</span> <span class="o">=</span> <span class="p">[]</span>    <span class="c1"># 第 4 节复用这批拟合结果，不再重复调用 fit</span>
+<span class="n">digit_models</span> <span class="o">=</span> <span class="p">[]</span>    <span class="c1"># 第 4 节复用这批拟合结果，不重复调用 fit</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"== 同一数据、不同 solver / 多分类策略 =="</span><span class="p">)</span>
 <span class="k">for</span> <span class="n">kw</span> <span class="ow">in</span> <span class="n">configs</span><span class="p">:</span>
     <span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">(</span><span class="n">record</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">caught</span><span class="p">:</span>
@@ -8321,7 +8319,7 @@ saga            [22]          4.82e-06  112.111494173      0
 <thead>
 <tr>
 <th>路径</th>
-<th>谁做 OvR</th>
+<th>OvR 实现方式</th>
 <th>代码位置</th>
 <th><code>n_iter_</code></th>
 </tr>
@@ -8329,7 +8327,7 @@ saga            [22]          4.82e-06  112.111494173      0
 <tbody>
 <tr>
 <td><code>liblinear</code></td>
-<td><strong>C++ 内部</strong>做 OvR</td>
+<td>C++ 内部</td>
 <td><code>fit</code> 早退 → <code>_fit_liblinear</code></td>
 <td><code>(n_classes,)</code></td>
 </tr>
@@ -8347,7 +8345,7 @@ saga            [22]          4.82e-06  112.111494173      0
 </tr>
 </tbody>
 </table>
-<p><code>multi_class="auto"</code> 不是「自动挑最好的」，而是一张<strong>能力表</strong>：<code>liblinear</code> / <code>newton-cholesky</code> 强制 <code>ovr</code>；其余 solver 在 <code>n_classes &gt; 2</code> 时给 <code>multinomial</code>，二分类回 <code>ovr</code>。显式写 <code>multinomial</code> 遇到不支持的实现直接 <code>ValueError</code>。</p>
+<p><code>multi_class="auto"</code> 不是「自动挑最好的」：<code>liblinear</code> / <code>newton-cholesky</code> 强制 <code>ovr</code>；其余 solver 在 <code>n_classes &gt; 2</code> 时给 <code>multinomial</code>，二分类回 <code>ovr</code>。显式写 <code>multinomial</code> 遇到不支持的实现直接 <code>ValueError</code>。</p>
 <p>一个容易误读的细节：multinomial 分支里的 <code>classes_ = [None]</code> 不是为了标签，而是为了<strong>让 joblib 的循环只跑一次</strong>；<code>pos_class</code> 在 multinomial 路径里根本不参与计算。</p>
 <p>并行方式也随 solver 变：<code>sag</code> / <code>saga</code> 释放 GIL，所以 <code>prefer="threads"</code>；其余 solver 用 <code>prefer="processes"</code>。</p>
 </div>
@@ -8775,7 +8773,7 @@ lbfgs       multinomial    (10, 64)   (1,)              1.0000      1
 <p>工作方式是三层循环：<code>n_classes × n_folds × n_cs</code>。每个 fold 调一次 <code>_log_reg_scoring_path</code>，后者一次算完整个 C 网格；它内部再调 <code>_logistic_regression_path</code>，后者在 <code>for C in Cs</code> 循环里把上一个 C 的解 <code>w0</code> 直接当下一个 C 的初值 —— 对 <code>lbfgs</code> / <code>newton-cg</code> / <code>newton-cholesky</code> / <code>sag+saga</code> 来说，这条路径天然是 warm start。</p>
 <p><code>liblinear</code> 是例外：它在循环里调用 <code>_fit_liblinear</code>，但<strong>不把结果写回 <code>w0</code></strong>，所以每个 C 都从头算；调用方传进来的 <code>coef</code> 也只写进 <code>w0</code>，随后同样被无视。<code>LogisticRegressionCV</code> 本身更没有 <code>warm_start</code> 参数（<code>_parameter_constraints</code> 里被 <code>pop</code> 掉了）。</p>
 <p>这也解释了 <code>n_iter_</code> 的三维形状：multinomial 是 <code>(1, n_folds, n_cs)</code>；OvR 是 <code>(n_classes, n_folds, n_cs)</code>。二分类的 <code>C_</code> 仍然是长度为 1 的数组，不是标量。</p>
-<p>本节代码为了只演示属性形状，先在全量数据上标准化、再交给 CV；这会让每一折的验证信息进入训练折。<strong>把 <code>StandardScaler</code> 和 <code>LogisticRegressionCV</code> 一起放进 <code>Pipeline</code> 并不能隔离这一点</strong>：<code>Pipeline.fit</code> 会先在传入的全部数据上拟合 scaler，然后才调用 <code>LogisticRegressionCV</code>，后者内部的交叉验证仍是在已经看过全量数据的特征上做的。要让每一折各自拟合 scaler，应把 scaler 和「固定 C 的模型」放在同一层，由外层 CV 在每折重新拟合：</p>
+<p>本节为了只演示属性形状，先在全量数据上标准化、再交给 CV；这会让每一折的验证信息进入训练折。<strong>把 <code>StandardScaler</code> 和 <code>LogisticRegressionCV</code> 一起放进 <code>Pipeline</code> 并不能隔离这一点</strong>：<code>Pipeline.fit</code> 会先在传入的全部数据上拟合 scaler，然后才调用 <code>LogisticRegressionCV</code>，后者内部的交叉验证仍是在已经看过全量数据的特征上做的。要让每一折各自拟合 scaler，应把 scaler 和「固定 C 的模型」放在同一层，由外层 CV 在每折重新拟合：</p>
 <div class="highlight"><pre><span></span><span class="n">GridSearchCV</span><span class="p">(</span>
     <span class="n">Pipeline</span><span class="p">([(</span><span class="s2">"scaler"</span><span class="p">,</span> <span class="n">StandardScaler</span><span class="p">()),</span>
               <span class="p">(</span><span class="s2">"model"</span><span class="p">,</span> <span class="n">LogisticRegression</span><span class="p">())]),</span>
@@ -8783,7 +8781,6 @@ lbfgs       multinomial    (10, 64)   (1,)              1.0000      1
     <span class="n">cv</span><span class="o">=...</span><span class="p">,</span>
 <span class="p">)</span>
 </pre></div>
-<p>或者手动在每个训练折内 <code>fit_transform</code>、在验证折上只 <code>transform</code>。</p>
 </div>
 </div>
 </div>
@@ -9052,7 +9049,7 @@ lbfgs       multinomial    (10, 64)   (1,)              1.0000      1
 <tr>
 <td><code>tol</code></td>
 <td>各实现</td>
-<td>量纲不同：lbfgs 的 <code>gtol</code>（投影梯度 ∞-范数）、两种牛顿法的梯度 ∞-范数、<code>sag</code>/<code>saga</code> 的内核判据、liblinear 传给 C++ 的 <code>eps</code></td>
+<td>量纲不同：lbfgs 的 <code>gtol</code>（投影梯度 ∞范数）、两种牛顿法的梯度 ∞范数、<code>sag</code>/<code>saga</code> 的内核判据、liblinear 传给 C++ 的 <code>eps</code></td>
 </tr>
 </tbody>
 </table>
@@ -9569,7 +9566,7 @@ lbfgs       multinomial    (10, 64)   (1,)              1.0000      1
 </tr>
 </tbody>
 </table>
-<p>一句话收尾：<strong><code>LogisticRegression</code> 的源码里，大量篇幅在做「把统一的参数翻译成五种实现的方言」；核心数值循环在编译扩展（Cython / C++）与 scipy 里，部分封装留在 Python 层（如 <code>_loss/loss.py</code>），源码仍然可读。</strong></p>
+<p><strong><code>LogisticRegression</code> 的源码里，大量篇幅在做「把统一的参数翻译成五种实现的方言」；核心数值循环在编译扩展（Cython / C++）与 scipy 里，部分封装留在 Python 层（如 <code>_loss/loss.py</code>），源码仍然可读。</strong></p>
 </div>
 </div>
 </div>
