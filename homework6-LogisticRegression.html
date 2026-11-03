@@ -7538,6 +7538,14 @@ a.anchor-link {
 <p><strong>主线</strong>：<code>linear_model.LogisticRegression</code> 与 <code>LogisticRegressionCV</code>；<code>SGDClassifier(loss="log_loss")</code> 不在主线（hw5 已讲 SGD 框架）。</p>
 </blockquote>
 <p>环境：<code>scikit-learn 1.3.2</code> / Python 3.8。以下实现细节均限定于 <strong>scikit-learn 1.3.2</strong>；文中行号也以 1.3.2 的库为准；notebook 内的行号一律由 <code>inspect</code> 现场取得，版本不符时第一段代码的断言会直接失败。</p>
+<p><strong>阅读路线图</strong>（11 节按五个问题组织，可按需跳读）：</p>
+<ul>
+<li><strong>统一参数翻译（1–2）</strong>：先建立统一目标 <code>J</code>，再看 <code>C</code>、<code>sample_weight</code>、<code>class_weight</code> 如何被翻译成五种 solver 的方言。第 2 节的 solver 分派表也是第 3 节的问题来源：实现一旦分家，<code>n_iter_</code> 这类「同名属性」就必然带着各自的口径。</li>
+<li><strong>目标与迭代语义（3–4）</strong>：<code>n_iter_</code> 为什么不能跨 solver 比较（liblinear 的 docstring 还落后于实现），以及 <code>multi_class</code> 为什么不是一个开关，而是三条互不共享的路径。</li>
+<li><strong>参数化细节（5–6）</strong>：二分类为什么只保存一行系数；两种牛顿法在 Hessian 的表示与求解上差在哪里。</li>
+<li><strong>CV 与预测（7–8）</strong>：<code>LogisticRegressionCV</code> 的固定网格与 warm start 路径；<code>predict</code> 的严格 <code>&gt;0</code> 阈值与 OvR 概率的边界行为。</li>
+<li><strong>参数落点（9–11）</strong>：哪些参数被静默忽略、警告或报错，三份 log loss 与 <code>n_threads</code> 的真实归宿，最后用一张「参数 → 生效位置」表收束。</li>
+</ul>
 </div>
 </div>
 </div>
@@ -7778,6 +7786,7 @@ $$</p>
 <th>实现</th>
 <th>实际目标</th>
 <th>缩放方式</th>
+<th>对应 <code>J</code> 中的项</th>
 </tr>
 </thead>
 <tbody>
@@ -7785,24 +7794,29 @@ $$</p>
 <td><code>lbfgs</code> / <code>newton-cg</code></td>
 <td><code>LinearModelLoss</code> + <code>l2_reg_strength = 1/C</code></td>
 <td>直接</td>
+<td><code>Σ s_iℓ_i + ‖w‖²/(2C)</code></td>
 </tr>
 <tr>
 <td><code>newton-cholesky</code></td>
 <td>先把 <code>sample_weight</code> 归一到和为 1，再令 <code>l2_reg_strength = 1/(C * sum(sw))</code></td>
 <td>源码注释 <code>nasty matter</code> （指这一步很棘手）</td>
+<td>以归一化权重写作 <code>Σ (s_i/sw_sum)ℓ_i + ‖w‖²/(2C·sw_sum)</code>，乘以 <code>sw_sum</code> 回到原式</td>
 </tr>
 <tr>
 <td><code>sag</code> / <code>saga</code></td>
 <td><code>alpha = 1/C</code>，再 <code>alpha_scaled = alpha / n_samples</code></td>
 <td>因为 SAG 的目标是 <code>(1/n) sum loss</code></td>
+<td><code>(1/n)Σℓ_i + ‖w‖²/(2Cn)</code>，乘以 <code>n</code> 回到原式</td>
 </tr>
 <tr>
 <td><code>liblinear</code></td>
 <td>C++ 内部 <code>0.5‖w‖² + C * sum loss</code></td>
 <td>整体除以 C</td>
+<td><code>Σℓ_i + ‖w‖²/(2C)</code></td>
 </tr>
 </tbody>
 </table>
+<p><code>LinearModelLoss.loss(..., sample_weight=s, l2_reg_strength=L)</code> 的惩罚项由 <code>l2_penalty</code> 计算，源码是 <code>0.5 * L * ‖w‖²</code>；所以传 <code>L = 1/C</code> 得到的是 <code>‖w‖²/(2C)</code>，与 <code>J</code> 中的项逐字对应，而不是 <code>‖w‖²/C</code>。表里其余几行的缩放，都是为了让同一个 <code>J</code> 在各自实现里可算。</p>
 <p><code>sample_weight</code> 整体缩放会改变模型：因为权重与 <code>C</code> 在目标函数里是耦合的。把权重全乘 7，等价于把 <code>C</code> 乘 7。</p>
 <p><code>class_weight</code> 的折叠位置取决于入口。下面这段源码属于 Python 层的 <code>_logistic_regression_path</code>：dict 形式和 multinomial 在原始标签上算，OvR 则先掩码成二值标签、再算 <code>balanced</code>。<code>liblinear</code> 不走这里 —— 它在 <code>fit</code> 里早退到 <code>_fit_liblinear</code>，由 <code>compute_class_weight(class_weight, classes=classes_, y=y)</code> 在原始标签上算一次。</p>
 </div>
@@ -8781,6 +8795,7 @@ lbfgs       multinomial    (10, 64)   (1,)              1.0000      1
     <span class="n">cv</span><span class="o">=...</span><span class="p">,</span>
 <span class="p">)</span>
 </pre></div>
+<p>下面这组对照实验故意把 <code>max_iter</code> 压到 3：迭代上限很小时，初值还没被「洗掉」，<code>C=60</code> 的解作为 <code>C=1</code> 的初值会留下可观测差异（<code>|dcoef| = 3.167e-01</code>）。这不代表 warm start 改变了最终解——它只改变收敛路径；把 <code>max_iter</code> 放大到 1000（<code>tol=1e-8</code>）后，同一对照的 <code>|dcoef|</code> 降到 <code>2.2e-05</code> 量级，说明两条路径已收敛到同一个最优点附近。</p>
 </div>
 </div>
 </div>
@@ -9340,8 +9355,9 @@ lbfgs       multinomial    (10, 64)   (1,)              1.0000      1
 <li><a href="https://github.com/scikit-learn/scikit-learn/blob/1.3.2/sklearn/svm/src/liblinear/linear.cpp">https://github.com/scikit-learn/scikit-learn/blob/1.3.2/sklearn/svm/src/liblinear/linear.cpp</a></li>
 </ul>
 <p>三者的数学形式相同，但<strong>归一化方式不同</strong>：<code>LinearModelLoss</code> 返回 <code>sum_i sw_i * loss_i</code>，SAG 的目标是 <code>(1/n) sum_i loss_i</code>，liblinear 是 <code>C * sum_i loss_i + 0.5‖w‖²</code>。这也是同一个 <code>C</code> 在不同实现里需要不同缩放的原因。</p>
+<p>把三种写法换算到同一尺度：<code>LinearModelLoss</code> 是 <code>Σℓ_i + ‖w‖²/(2C)</code>；SAG 内部先取 <code>alpha = 1/C</code>，再令 <code>alpha_scaled = alpha/n</code>，目标为 <code>(1/n)Σℓ_i + ‖w‖²/(2Cn)</code>，乘以 <code>n</code> 就回到 <code>LinearModelLoss</code> 的式子（二者只差一个整体因子 <code>1/n</code>，最优点不变）；liblinear 是 <code>CΣℓ_i + 0.5‖w‖²</code>，除以 <code>C</code> 后同样回到该式。</p>
 <p><strong>dtype 能力矩阵</strong>：<code>lbfgs</code> 强制 <code>float64</code>；其余 solver 接受 <code>[float64, float32]</code>，但 <code>liblinear</code> 内部再转回 <code>float64</code>。所以 <code>float32</code> 输入下，只有 <code>newton-cg</code> / <code>newton-cholesky</code> / <code>sag</code> / <code>saga</code> 的 <code>coef_</code> 保持 <code>float32</code>。</p>
-<p><strong><code>n_threads</code></strong>：<code>_logistic_regression_path</code> 里有一段看起来很讲究的分支，注释说「未来希望用 OpenMP 线程」，但 1.3.2 的两个分支都赋值 <code>1</code> —— 实际并行仍然靠 joblib 按类分发，损失内核是单线程。</p>
+<p><strong><code>n_threads</code></strong>：<code>LogisticRegression.fit</code> 里有一段看起来很讲究的分支：当 solver 属于 lbfgs / newton-cg / newton-cholesky、且是二分类单任务、<code>n_jobs=1</code> 时走 <code>if</code>，其余走 <code>else</code>，但两个分支都赋值 <code>1</code>。它不是功能开关，而是<strong>为将来 OpenMP 并行预留的占位</strong>：源码注释写着「In the future, we would like n_threads = _openmp_effective_n_threads()；For the time being, we just do n_threads = 1」。它上方的 TODO 还说明，未来二分类 / multinomial 应完全不用 joblib，只在 OvR 时按类分发。1.3.2 的实际并行仍然靠 joblib，损失内核是单线程。</p>
 </div>
 </div>
 </div>
@@ -9480,7 +9496,7 @@ lbfgs       multinomial    (10, 64)   (1,)              1.0000      1
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="11.-%E5%B0%8F%E7%BB%93%EF%BC%9A%E4%B8%80%E5%BC%A0%E3%80%8C%E5%8F%82%E6%95%B0-%E2%86%92-%E7%94%9F%E6%95%88%E4%BD%8D%E7%BD%AE%E3%80%8D%E8%A1%A8">11. 小结：一张「参数 → 生效位置」表<a class="anchor-link" href="#11.-%E5%B0%8F%E7%BB%93%EF%BC%9A%E4%B8%80%E5%BC%A0%E3%80%8C%E5%8F%82%E6%95%B0-%E2%86%92-%E7%94%9F%E6%95%88%E4%BD%8D%E7%BD%AE%E3%80%8D%E8%A1%A8">¶</a></h2><table>
+<h2 id="11.-%E5%B0%8F%E7%BB%93%EF%BC%9A%E3%80%8C%E5%8F%82%E6%95%B0-%E2%86%92-%E7%94%9F%E6%95%88%E4%BD%8D%E7%BD%AE%E3%80%8D%E8%A1%A8">11. 小结：「参数 → 生效位置」表<a class="anchor-link" href="#11.-%E5%B0%8F%E7%BB%93%EF%BC%9A%E3%80%8C%E5%8F%82%E6%95%B0-%E2%86%92-%E7%94%9F%E6%95%88%E4%BD%8D%E7%BD%AE%E3%80%8D%E8%A1%A8">¶</a></h2><table>
 <thead>
 <tr>
 <th>参数</th>
@@ -9566,7 +9582,6 @@ lbfgs       multinomial    (10, 64)   (1,)              1.0000      1
 </tr>
 </tbody>
 </table>
-<p><strong><code>LogisticRegression</code> 的源码里，大量篇幅在做「把统一的参数翻译成五种实现的方言」；核心数值循环在编译扩展（Cython / C++）与 scipy 里，部分封装留在 Python 层（如 <code>_loss/loss.py</code>），源码仍然可读。</strong></p>
 </div>
 </div>
 </div>
